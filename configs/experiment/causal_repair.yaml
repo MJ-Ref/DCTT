@@ -1,0 +1,59 @@
+# Causal Repair Experiment
+experiment:
+  name: "causal_repair"
+  description: "Repair high-severity tokens and compare to matched controls"
+
+  # Candidate selection
+  candidates:
+    method: "priority"  # severity * consistency * log(freq+1)
+    top_n: 100  # Number of tokens to repair
+    min_consistency: 0.6
+    min_severity_percentile: 95
+
+  # Matched controls
+  controls:
+    method: "propensity_score"
+    match_on:
+      - frequency_tier
+      - token_type
+      - norm_decile
+    n_controls_per_treated: 1
+
+  # Repair settings
+  repair:
+    method: "constrained_optimization"
+
+    # Optimization parameters
+    max_outer_iters: 5
+    max_inner_steps: 100
+    learning_rate: 0.01
+
+    # Loss weights
+    lambda_anchor: 1.0
+    lambda_nn_preserve: 0.5
+    lambda_logit_preserve: 0.0  # Expensive, optional
+
+    # Constraints
+    delta_max: 0.3  # Max embedding change norm
+    geometry_loss: "cond"  # "cond", "logdet", "pr", "combined"
+
+  # Placebo repair for controls
+  placebo:
+    enabled: true
+    same_optimizer_budget: true
+
+  # Evaluation
+  evaluation:
+    pre_repair:
+      stress_tests: true
+      benchmarks: [humaneval_mini, gsm8k_mini]
+    post_repair:
+      stress_tests: true
+      benchmarks: [humaneval_mini, gsm8k_mini]
+      regression_suite: true
+
+  # Statistical analysis
+  statistics:
+    bootstrap_samples: 1000
+    confidence_level: 0.95
+    paired_tests: true

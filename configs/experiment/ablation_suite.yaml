@@ -1,0 +1,57 @@
+# Ablation Study Suite
+experiment:
+  name: "ablation_suite"
+  description: "Systematic ablation studies for paper"
+
+  # Which ablations to run
+  ablations:
+    # Stage ablations
+    stages:
+      enabled: true
+      variants:
+        - [stage1]
+        - [stage1, stage2]
+        - [stage1, stage2, stage3]
+
+    # Neighborhood size
+    neighborhood_k:
+      enabled: true
+      values: [25, 50, 100, 200]
+
+    # Distance metric
+    distance_metric:
+      enabled: true
+      values: [cosine, euclidean]
+
+    # Severity definition
+    severity_weights:
+      enabled: true
+      variants:
+        - {cond: 1.0, pr: 0.0, logdet: 0.0}
+        - {cond: 0.0, pr: 1.0, logdet: 0.0}
+        - {cond: 0.0, pr: 0.0, logdet: 1.0}
+        - {cond: 1.0, pr: 1.0, logdet: 1.0}
+
+    # Repair loss
+    repair_loss:
+      enabled: true
+      values: [cond, logdet, pr, combined]
+
+    # Anchor strength
+    anchor_lambda:
+      enabled: true
+      values: [0.1, 0.5, 1.0, 2.0, 5.0]
+
+    # Candidate selection
+    candidate_selection:
+      enabled: true
+      variants:
+        - severity_only
+        - severity_x_consistency
+        - severity_x_consistency_x_freq
+
+  # Common settings
+  common:
+    tokens_to_repair: 50  # Smaller for ablations
+    stress_test_samples: 100
+    benchmark_subset: true  # Use mini versions

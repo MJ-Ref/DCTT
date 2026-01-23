@@ -1,0 +1,22 @@
+# Llama-3.1-8B Model Configuration (Secondary validation)
+model:
+  name: "meta-llama/Meta-Llama-3.1-8B"
+  revision: "main"
+  family: "llama3"
+
+  # Embedding extraction
+  embedding_source: "model.embed_tokens.weight"
+  embedding_dim: 4096
+  vocab_size: 128256
+
+  # Model loading
+  torch_dtype: "bfloat16"
+  trust_remote_code: false
+  low_cpu_mem_usage: true
+
+  use_mlx: false
+
+  # Tokenizer
+  tokenizer:
+    trust_remote_code: false
+    use_fast: true

@@ -1,0 +1,815 @@
+Built directly from your early DCTT draft: 
+
+```markdown
+# DCTT Research Foundation
+**Project:** Discrete-to-Continuous Transition Testing (DCTT) for LLM Embedding Geometry  
+**Status:** Foundational spec (living document)  
+**Primary artifact:** `EmbeddingGeometry.md` (this file)  
+**Owner:** (you)  
+**Last updated:** 2026-01-23  
+
+---
+
+## 0) Executive Summary
+
+**Goal:** Build a *rigorous, reproducible* framework to (1) diagnose token-level embedding geometry pathologies and (2) apply *minimal, localized repairs* that yield measurable improvements on downstream tasks (especially code and math), while preventing regressions on general language behavior.
+
+**Core contribution we aim to formalize:**
+1. **Diagnostics:** A staged token screening pipeline (cheap → expensive) that identifies local neighborhood degeneracies and assigns a robust severity score (incl. a consistency metric `cons@k`).
+2. **Causal evaluation:** Token-level stress tests + matched controls to show geometry issues predict and *cause* downstream failures beyond confounds (frequency, token type).
+3. **Repairs:** Minimal embedding edits for a small subset of problematic tokens that improve geometry and downstream outcomes without broad model degradation.
+4. **Reproducibility:** A full experiment suite with ablations, compute accounting, and statistical confidence.
+
+**Key design principle:** This project must survive a skeptical reviewer: *no hand-wavy “geometry seems bad.”* Every claim must be tied to (a) stable metrics, (b) confound controls, and (c) causal interventions.
+
+---
+
+## 1) Scope
+
+### 1.1 In Scope
+- Token embedding matrix analysis (input embeddings and/or tied embeddings).
+- Local neighborhood geometry (kNN-based) and its relationship to downstream failure modes.
+- Minimal token embedding repairs (editing a small subset of token vectors) under a “frozen model” setting.
+- Optional: further fine-tuning after embedding edits as a secondary result (clearly separated).
+
+### 1.2 Out of Scope (for the first strong paper)
+- Tokenizer/vocabulary changes that require re-tokenization and retraining (can be future work).
+- Heavy model retraining or architecture changes.
+- Claims about “reasoning” beyond what the benchmarks objectively measure.
+
+### 1.3 Non-goals
+- Not trying to “make embeddings orthonormal globally.”
+- Not trying to “prove” a universal theorem about embedding manifolds.
+- Not trying to maximize novelty via complex math if it doesn’t move results.
+
+---
+
+## 2) Research Questions and Hypotheses
+
+### RQ1 — Diagnostic validity
+**Do token-level local geometry pathologies predict downstream errors (code/math) beyond confounds like token frequency and token type?**
+
+**H1:** Geometry metrics (local condition number, effective rank, anisotropy, etc.) add predictive power beyond frequency/type baselines.
+
+### RQ2 — Causal repair
+**If we repair a small set of high-severity/high-consistency tokens, do downstream outcomes improve vs matched controls?**
+
+**H2:** Repairing flagged tokens yields statistically significant improvements on token stress tests and measurable gains on code/math benchmarks, while preserving general LM performance.
+
+### RQ3 — Stage justification
+**Do later stages (e.g., advanced metrics) reduce false positives or catch failures earlier stages miss?**
+
+**H3:** Stage 2 spectral metrics explain most variance; Stage 3 only stays if it demonstrably adds value (precision/recall improvement or extra downstream gains per compute).
+
+---
+
+## 3) Key Definitions
+
+### 3.1 Objects
+- **Vocabulary**: `V` tokens.
+- **Embedding dimension**: `d`.
+- **Embedding matrix**: `E ∈ R^{V×d}` where `E[t] = e_t`.
+- **Tokenizer**: maps text → token IDs; we assume stable ID mapping for a given model.
+- **Token frequency**: `f_t` measured from a corpus relevant to the model’s domain (or a proxy like tokenizer training stats if available).
+
+### 3.2 Token Types (initial)
+- `full_word`: alphabetic words or common tokens that map to whole words
+- `subword`: BPE pieces, word fragments
+- `special`: BOS/EOS, whitespace, control tokens, etc.
+- (Optional) add `punctuation`, `numeric`, `code_symbol` if you can classify reliably.
+
+### 3.3 Distances
+Embedding spaces are often anisotropic. Choose a default distance and justify it.
+
+**Default recommendation:**
+- Use **cosine distance** on **L2-normalized** embeddings:
+  - `x_t = e_t / ||e_t||`
+  - `dist_cos(t,u) = 1 - x_t · x_u`
+
+**Alternative (ablation):**
+- Euclidean distance on normalized embeddings.
+- Euclidean distance on raw embeddings (likely worse due to norm effects).
+
+### 3.4 Neighborhoods
+Avoid radius-based neighborhoods as the default (unstable in high-dim). Prefer fixed-k neighborhoods.
+
+- **kNN neighborhood:** `N_k(t)` = the set of k nearest neighbors of token `t` in embedding space.
+- Typical choices: `k ∈ {25, 50, 100, 200}`.
+
+**If you keep radius neighborhoods:**
+- Define radius `r_t` using a global statistic such as the median distance to the kth neighbor, so it scales across tokens.
+
+### 3.5 Local geometry matrix options (important)
+Your diagnostic/repair must be defined so that editing `e_t` meaningfully changes the metric.
+
+Two common choices:
+
+#### Option A — Neighbor embeddings matrix
+`X = [e_{n1}, ..., e_{nk}]^T ∈ R^{k×d}`
+
+**Issue:** Metrics on `X` do not directly involve `e_t` except through neighbor selection.
+
+#### Option B — Displacement matrix (recommended)
+`Δ = [e_{n1}-e_t, ..., e_{nk}-e_t]^T ∈ R^{k×d}`
+
+This makes “local shape around t” explicit, and editing `e_t` affects all rows.
+
+**We will standardize on Option B for Stage 2+ repairs** unless a specific metric demands Option A.
+
+### 3.6 Centering
+When computing SVD/covariance, define centering explicitly:
+- `Δ_centered = Δ - mean(Δ, axis=0)`
+- Covariance `C = (Δ_centered^T Δ_centered)/(k-1)`
+
+### 3.7 Condition number
+For covariance `C` (PSD), define:
+- eigenvalues `λ1 ≥ ... ≥ λd ≥ 0`
+- `cond(C) = (λ1 + ε) / (λd_eff + ε)`  
+where `λd_eff` is the smallest *meaningful* eigenvalue (see “effective rank” section) to reduce numerical artifacts.
+
+### 3.8 Effective rank / intrinsic dimension
+You need a stable “local dimension” estimate.
+
+Options:
+1. **PCA explained variance dimension**:
+   - smallest `m` such that `Σ_{i=1..m} λi / Σ_{i=1..d} λi ≥ τ` (e.g., τ=0.95)
+2. **Participation ratio (PR)**:
+   - `PR = (Σ λi)^2 / Σ (λi^2)`
+3. **Entropy-based effective rank**:
+   - `p_i = λi / Σ λi`
+   - `r_eff = exp( -Σ p_i log p_i )`
+
+We will implement at least (1) and (2), use (3) as optional.
+
+---
+
+## 4) DCTT Pipeline Overview (Formal)
+
+### 4.1 Output artifacts (per token)
+For each token `t`, compute:
+- Stage pass/fail per stage
+- Metric vector `m_t`
+- Severity score `sev(t)` (continuous)
+- Consistency score `cons@k(t)`
+- Importance weight `imp(t)` (frequency × severity, optional)
+- Repair status and delta norms after repair
+
+### 4.2 Stage design philosophy
+- **Stage 1:** fast filters to catch obvious outliers / sparse neighborhoods.
+- **Stage 2:** spectral geometry metrics (core of the method).
+- **Stage 3:** advanced metrics only if proven additive.
+
+---
+
+## 5) Stage 0 — Preprocessing (Mandatory)
+
+### 5.1 Extract embeddings
+Define exactly which matrix you use:
+- Input token embeddings (`model.embed_tokens.weight`)
+- Output embeddings / LM head (if untied)
+- If tied, same weights.
+
+Record:
+- model name/version/hash
+- tokenizer hash
+- embedding dim `d`, vocab size `V`
+
+### 5.2 Normalize
+Default:
+- `x_t = e_t / ||e_t||` (store norms too; norms might be informative)
+
+### 5.3 Build index
+Use FAISS or HNSW:
+- Build index over normalized embeddings.
+- Store the index configuration, random seed, and build time.
+
+**Important reproducibility detail:**
+Approximate kNN can vary slightly across runs; that is why `cons@k` exists. Still:
+- Set deterministic seeds when supported.
+- Log index parameters.
+
+---
+
+## 6) Stage 1 — Basic Local Outlier Checks (Fast)
+
+### 6.1 Metrics
+Compute on `kNN` distances `{d_i}` for neighbors `u ∈ N_k(t)`:
+
+1. **Mean kNN distance**
+   - `μ_k(t) = mean(d_i)`
+2. **Median kNN distance**
+   - `med_k(t) = median(d_i)`
+3. **Quantile spread ratio (robust replacement for max/min)**
+   - `spread_q(t) = q90(d_i) / (q10(d_i) + ε)`
+4. **Local outlier factor (optional baseline)**
+   - LOF score using kNN graph (can be expensive; keep optional).
+
+### 6.2 Flagging rule
+Instead of hard-coded thresholds, use distributional thresholds:
+- Bucket tokens by `(frequency tier, token type)`.
+- Compute metric distribution per bucket.
+- Flag as Stage 1 fail if:
+  - `μ_k(t)` > bucket p99 OR
+  - `spread_q(t)` > bucket p99
+  - (Optionally include LOF > bucket p99)
+
+This reduces arbitrary thresholds and improves reviewer trust.
+
+### 6.3 Stage 1 outputs
+- `fail_s1 ∈ {0,1}`
+- `s1_metrics = {μ_k, med_k, spread_q, (lof)}`
+
+---
+
+## 7) Stage 2 — Core Spectral Geometry (Main Contribution)
+
+### 7.1 Construct displacement neighborhood
+For token `t`:
+- neighbors `u_i ∈ N_k(t)`
+- `Δ_i = x_{u_i} - x_t`  (use normalized)
+- Stack into `Δ ∈ R^{k×d}`
+
+Center:
+- `Δc = Δ - mean(Δ, axis=0)`
+
+Compute covariance:
+- `C = (Δc^T Δc)/(k-1)`
+
+### 7.2 Metrics (compute all)
+1. **Explained-variance dimension**
+   - `dim95(t) = min m s.t. Σ_{i≤m} λi / Σ λi ≥ 0.95`
+2. **Participation ratio**
+   - `PR(t) = (Σ λi)^2 / Σ λi^2`
+3. **Local condition number (robust)**
+   - `cond(t) = (λ1 + ε) / (λ_{m} + ε)`  
+     where `m = max(dim95(t), m_min)` and `m_min` e.g. 10 to avoid dividing by tiny eigenvalues due to noise.
+4. **Log-volume / dispersion**
+   - `logdet(C + εI)` (or sum log(λi+ε))
+5. **Anisotropy**
+   - `anis(t) = λ1 / (mean(λi) + ε)` (or λ1 / λ2)
+6. **Neighborhood stability**
+   - Jaccard overlap between `N_k(t)` across multiple index builds or random projections (optional; may feed into `cons@k`).
+
+### 7.3 Stage 2 flagging rules (initial)
+Flag if any of:
+- `dim95(t) < d_min` (e.g., < 2 or < 5 depending on k/d)
+- `PR(t) < PR_min` (bucketed threshold)
+- `cond(t) > cond_max` (bucketed threshold)
+- `logdet` extremely low (bucket p1)
+
+**All thresholds are adaptive** (see Section 9).
+
+### 7.4 Severity score (continuous)
+We need a severity score that supports ranking and selecting top offenders.
+
+Example:
+- Normalize each metric within its bucket using robust z-scores:
+  - `z(m) = (m - median_bucket(m)) / MAD_bucket(m)`
+- Define:
+  - `sev(t) = w1 * z(cond) + w2 * z(-PR) + w3 * z(-logdet) + w4 * z(spread_q)`
+- Use `w` weights initially equal; later learn weights by predicting token stress failures.
+
+Log:
+- raw metrics
+- bucket medians/MADs
+- `sev(t)`
+
+---
+
+## 8) Stage 3 — Advanced / Optional Metrics (Only if Justified)
+
+Stage 3 stays ONLY if it provides measurable incremental value.
+
+### 8.1 Candidate advanced metrics (choose 1–2 max)
+#### A) Local intrinsic dimension estimators (lighter than fractal box-counting)
+- MLE intrinsic dimension via neighbor distance ratios (common in manifold learning).
+- Often more stable than box-counting in high dimension.
+
+#### B) Persistent homology (TDA)
+If you keep it:
+- Operate on a **projected** neighborhood:
+  - Random projection to `p=20–50` dims or PCA to top `p` components.
+- Subsample neighbors to `k_sub=50–100`.
+- Compute Vietoris–Rips 0D/1D using `ripser` or `GUDHI`.
+- Extract features:
+  - max lifetime in H1
+  - number of long-lived H1 features
+- Flag only when lifetime exceeds bucketed threshold.
+
+### 8.2 Compute gating (mandatory)
+Do not run Stage 3 on every token.
+
+Run Stage 3 only on:
+- tokens with `sev(t)` above a high percentile (e.g., top 1–5%), OR
+- tokens that are borderline Stage 2 fails (near thresholds), OR
+- tokens that are high-frequency AND moderately severe.
+
+### 8.3 Stage 3 deliverable
+Ablation must show:
+- +precision, +recall on token stress tests OR
+- +downstream benchmark improvement per compute
+
+If not, move Stage 3 to appendix/future work.
+
+---
+
+## 9) Adaptive Thresholding (Formal, Reviewer-Friendly)
+
+### 9.1 Frequency tiers
+Define tiers by corpus frequency quantiles on `log(f_t + 1)`:
+- `high`: top 20%
+- `mid`: middle 60%
+- `low`: bottom 20%
+(Adjust as needed; must be logged.)
+
+### 9.2 Token type buckets
+At minimum: `full_word`, `subword`, `special`.
+
+### 9.3 Threshold computation
+For each bucket `b`, compute robust thresholds:
+- For “large is bad” metrics (cond, μ_k, spread_q):
+  - `thr_b = quantile(m in b, 0.99)` or `0.995`
+- For “small is bad” metrics (PR, logdet):
+  - `thr_b = quantile(m in b, 0.01)` or `0.005`
+
+Optionally calibrate thresholds via a held-out token stress dataset:
+- choose thresholds that optimize F1 or precision@N for predicting failures.
+
+**Key:** thresholds are data-driven, not arbitrary constants.
+
+---
+
+## 10) Consistency Metric `cons@k` (Robustness Requirement)
+
+### 10.1 Definition
+For each token `t`, repeat the diagnostic `k` times under controlled perturbations:
+- different kNN index seeds/builds OR
+- slightly different `k` (e.g., 50, 75, 100) OR
+- random projections (e.g., 3–5 different projection matrices) then kNN in projected space
+- (Optional) small embedding noise to test stability
+
+Let `fail_j(t) ∈ {0,1}` be whether token fails Stage 2 (or composite criterion) on run j.
+
+Define:
+- `cons@k(t) = (1/k) Σ_j fail_j(t)`
+
+### 10.2 Bayesian confidence (optional, but strong)
+Treat failures as Bernoulli:
+- posterior `p_t ~ Beta(1+fails, 1+(k-fails))`
+- report `E[p_t]` and credible interval
+This helps defend decisions like “cons@k > 0.8”.
+
+### 10.3 How `cons@k` is used
+Select repair candidates using both severity and consistency:
+- `priority(t) = sev(t) * cons@k(t) * g(f_t)`  
+where `g(f_t)` is an importance weight (e.g., `log(f_t+1)`).
+
+---
+
+## 11) Token Stress Tests (Critical for Causality)
+
+Global benchmarks are too noisy to establish token-level causality. We need micro tests that isolate token effects.
+
+### 11.1 Stress test principles
+- Each test suite targets a token class (code punctuation, math operators, whitespace tokens, etc.).
+- A token is “in play” when the prompt strongly encourages or requires it.
+- Evaluation produces:
+  - failure type (syntax error, wrong numeric answer, formatting violation)
+  - pass/fail
+  - confidence proxy (e.g., logprob margin)
+
+### 11.2 Test families
+
+#### A) Code-focused tests
+**Targets:**
+- indentation/whitespace tokens
+- punctuation: `:`, `{`, `}`, `(`, `)`, `,`
+- operators: `==`, `<=`, `+=`
+- common library tokens if relevant
+
+**Test types:**
+1. **Syntax-only compilation**: generate a snippet and run a parser/compiler check (language-specific).
+2. **Unit tests**: minimal unit tests where the code must pass.
+3. **Format constraints**: enforce correct brackets/indentation; count mismatches.
+
+**Output:** `code_fail_rate(t)` per token or per token group.
+
+#### B) Math-focused tests
+**Targets:**
+- `+`, `-`, `*`, `/`, `^`
+- parentheses
+- equals sign, fraction markers, decimal points
+- LaTeX-ish tokens if present
+
+**Test types:**
+1. **Operator insertion**: prompts where a specific operator must appear in correct place.
+2. **Parentheses balancing**: multi-step expression formatting.
+3. **Exact answer**: short arithmetic/logic with constrained output format.
+
+**Output:** `math_fail_rate(t)`.
+
+#### C) “Forced token” tests (harder, but powerful)
+If you can use constrained decoding or edit-distance objectives:
+- force inclusion of token `t` and measure induced degradation
+- or compare completions when token `t` is replaced by nearest neighbor token.
+
+### 11.3 Matched controls
+For any analysis:
+- choose control tokens matched on:
+  - frequency tier
+  - token type
+  - similar norm distribution
+This is non-negotiable for reviewer acceptance.
+
+---
+
+## 12) Causal Repair Methods (Minimal, Defensible)
+
+### 12.1 Candidate selection for repair
+Choose top-N tokens by `priority(t)` subject to:
+- `cons@k(t) ≥ cons_min` (e.g., 0.6–0.8)
+- `sev(t) ≥ sev_min` (top percentile)
+- optionally “high impact” tokens by frequency
+
+### 12.2 Repair objective (recommended main method)
+We edit only `e_t` (or `x_t` with renorm), leaving the rest frozen.
+
+Define:
+- `L_geom(t, x_t)` computed from displacement matrix `Δ` and covariance `C`.
+- `L_anchor = ||x_t - x_t^0||^2` (keep close to original)
+- `L_nn_preserve = Σ_{u in TopMNN(t)} ( (x_t · x_u) - (x_t^0 · x_u) )^2` (optional)
+- `L_logit_preserve` (optional): KL divergence on logits in a small context set where token appears
+
+Optimization:
+- `min_{x_t}  L_geom + λ L_anchor + μ L_nn_preserve (+ ν L_logit_preserve)`
+Constraints:
+- `||x_t|| = 1` (renormalize each step)
+- `||x_t - x_t^0|| ≤ δ_max` (project if needed)
+
+**Geometry losses (choose 1–2):**
+- minimize `log(cond(C)+ε)`
+- maximize `logdet(C+εI)`
+- maximize `PR`
+- penalize extreme anisotropy
+
+**Implementation note:** Because neighbors depend on `x_t`, use a two-loop scheme:
+1. Fix neighbors `N_k(t)` using current `x_t`.
+2. Optimize `x_t` for a few steps.
+3. Recompute neighbors and repeat (a small number of outer iterations).
+
+This makes the dependence explicit and stable.
+
+### 12.3 Orthogonalization baseline
+Implement a simple baseline repair:
+- compute local PCA directions from `Δ`
+- project `x_t` away from dominant principal direction(s) or toward increasing dispersion
+This is a baseline, not the main method, unless it wins.
+
+### 12.4 RL-based repair (optional / secondary)
+Only keep RL if:
+- you can define a *non-differentiable* reward (unit test pass/fail),
+- and RL beats gradient-free baselines or constrained optimization.
+
+If used:
+- State: `x_t`, summary stats (cond, PR, etc.)
+- Action: `Δx` bounded by norm
+- Reward: `-log(cond)` + α*(micro-test pass)
+- Budget: explicit rollouts and compute costs logged
+- Compare to: random search, CMA-ES/NES, and your constrained optimizer.
+
+### 12.5 Safety constraint: semantic drift
+After repair, validate:
+- nearest neighbors overlap (Jaccard) does not collapse
+- similarity to original vector is high
+- general eval regressions are bounded
+
+---
+
+## 13) Evaluation Plan (What we must report)
+
+### 13.1 Diagnostic evaluation (RQ1)
+1. **Geometry census**
+   - distribution plots of key metrics per bucket
+   - count of tokens flagged per stage
+2. **Predictive validity**
+   - predict token stress test failure using:
+     - frequency only baseline
+     - type only baseline
+     - frequency+type
+     - geometry metrics
+     - frequency+type+geometry (full)
+   - report AUC / PR-AUC, and feature importance or ablation
+
+### 13.2 Causal evaluation (RQ2)
+1. Pick a set `T_bad` of top tokens by priority.
+2. Pick matched control set `T_ctrl` (same size) matched on type & frequency.
+3. Apply repair to `T_bad` and separately apply “placebo repair” to `T_ctrl` (same optimizer budget).
+4. Evaluate:
+   - token stress tests (primary)
+   - plus code/math benchmarks (secondary but important)
+
+**Report deltas with confidence intervals** (bootstrap over problems/prompts).
+
+### 13.3 Downstream benchmarks (secondary but necessary)
+- Code: HumanEval (pass@1, pass@10 if available), plus another code set if possible
+- Math: GSM8k accuracy; MATH accuracy (or subset if compute limited)
+- General regression suite (must-have):
+  - perplexity on a text corpus OR
+  - a general benchmark (e.g., MMLU-like) or a smaller proxy
+The paper must show “no big regression.”
+
+### 13.4 Compute and scalability
+Report:
+- time to build kNN index
+- time per stage
+- memory usage
+- scaling with vocab size V and k
+
+---
+
+## 14) Baselines (Minimum Set)
+
+### 14.1 Diagnostic baselines
+- Frequency-only heuristics (rare tokens are “bad”)
+- Norm-only heuristics (if norms vary)
+- LOF / density-based outlier detection (Stage 1 competitor)
+
+### 14.2 Repair baselines
+- No repair (vanilla)
+- Random matched token repair (placebo)
+- Simple projection / orthogonalization
+- Embedding-only fine-tune WITHOUT geometry regularizer
+- Global embedding projection (should usually harm; include for completeness)
+
+---
+
+## 15) Ablations (Must-have for acceptance)
+
+1. Stage 1 only vs Stage 1+2 vs Stage 1+2(+3)
+2. Different neighborhood sizes k
+3. Distance metric: cosine vs L2
+4. Severity definition variants
+5. Repair objective variants:
+   - cond-only
+   - logdet-only
+   - PR-only
+   - combined
+6. Anchor strength λ sweep (semantic drift control)
+7. Candidate selection:
+   - severity-only vs severity×consistency×frequency
+
+---
+
+## 16) Statistical Standards
+
+- Always run with multiple seeds where randomness exists (index build, projection, repair init).
+- Use bootstrap CIs for benchmark deltas.
+- Use paired tests where possible (same problems before/after).
+- Explicitly report:
+  - number of tokens repaired
+  - average and max embedding change norms
+  - how many tokens worsened in geometry and why
+
+---
+
+## 17) Implementation Blueprint (Repo Layout)
+
+```
+
+dctt/
+**init**.py
+config/
+default.yaml
+model_llama.yaml
+model_mistral.yaml
+data/
+corpora/                 # optional local corpora for frequency estimation
+stress_tests/
+embeddings/
+extract.py               # load model, pull embedding matrices, save to disk
+normalize.py
+neighbors/
+build_index.py           # FAISS/HNSW index build
+query.py                 # kNN queries
+metrics/
+stage1.py
+stage2.py
+stage3.py               # optional
+severity.py
+consistency.py
+thresholding.py
+repair/
+optimize.py              # constrained optimization
+projection.py            # orthogonal baseline
+rl.py                    # optional
+validate_semantics.py
+eval/
+stress_code.py
+stress_math.py
+humaneval.py
+gsm8k.py
+regressions.py
+experiments/
+run_census.py
+run_predictive_validity.py
+run_causal_repair.py
+run_ablation_suite.py
+scripts/
+make_plots.py
+summarize_results.py
+outputs/
+runs/                    # each run has config, logs, metrics, plots
+
+````
+
+**Config management:** Hydra/YAML recommended; every run stores:
+- git commit hash
+- model hash
+- tokenizer hash
+- config snapshot
+- random seeds
+
+---
+
+## 18) Key Figures/Tables to Target (Paper-Ready)
+
+### Figures
+1. Pipeline diagram: Stage 0–3 + repair loop
+2. Metric distributions by bucket (cond, PR, dim95)
+3. Scatter: severity vs token stress failure rate (with frequency controls)
+4. Causal results: repaired vs matched control deltas (with CI bars)
+5. Compute scaling plot: time vs vocab size
+
+### Tables
+1. Benchmark results (before/after) + regressions
+2. Ablation table (stages, losses, selection rules)
+3. Top repaired tokens summary:
+   - token string (if permitted), type, frequency tier
+   - severity, cons@k
+   - geometry improvement
+   - stress test delta
+
+---
+
+## 19) Risks & Mitigations
+
+### Risk A: Metrics track frequency, not geometry
+**Mitigation:** regression controls + matched controls + show incremental predictive power.
+
+### Risk B: Repair changes semantics and harms general behavior
+**Mitigation:** strong anchor losses; logit-preservation on sampled contexts; regression suite.
+
+### Risk C: Neighbor selection instability
+**Mitigation:** `cons@k`, index reproducibility logging, sensitivity analyses.
+
+### Risk D: Stage 3 “math garnish”
+**Mitigation:** Stage 3 is optional; it must justify itself via ablation.
+
+### Risk E: Improvements are small/noisy
+**Mitigation:** token stress tests provide higher signal; use paired evaluation, CIs, and report negative results.
+
+---
+
+## 20) Concrete “Next Actions” Checklist (Start Here)
+
+### Setup
+- [ ] Choose target model(s) with accessible embeddings.
+- [ ] Extract embedding matrix and tokenizer; log hashes.
+- [ ] Build normalized embedding index (FAISS/HNSW); log config.
+
+### Diagnostics MVP
+- [ ] Implement Stage 1 metrics on kNN distances.
+- [ ] Implement Stage 2 displacement-based covariance metrics (cond, PR, dim95, logdet).
+- [ ] Implement bucketed adaptive thresholds.
+- [ ] Implement severity score + ranking.
+
+### Robustness
+- [ ] Implement `cons@k` via multiple index seeds and/or random projections.
+- [ ] Build candidate selection: `priority = sev * cons * log(freq+1)`.
+
+### Stress tests (minimum viable)
+- [ ] Implement code syntax stress suite (parser/compile checks).
+- [ ] Implement math formatting / arithmetic suite.
+- [ ] Log per-token failure rates and failure types.
+
+### Repairs MVP
+- [ ] Implement constrained optimizer repair with anchor + geometry loss.
+- [ ] Implement placebo repair on matched controls.
+- [ ] Validate geometry improvement and semantic preservation.
+
+### End-to-end causal experiment
+- [ ] Repair top-N tokens (and placebo controls).
+- [ ] Run stress tests pre/post; compute CIs.
+- [ ] Run at least one code and one math benchmark pre/post.
+- [ ] Run regression suite.
+
+### Write-up assets
+- [ ] Generate required plots/tables for the “paper story”.
+- [ ] Prepare ablation suite.
+
+---
+
+## 21) Open Questions (Decisions to Lock Down Early)
+
+1. Neighborhood size `k`: default 50 or 100?
+2. Which geometry metric is primary: cond vs PR vs logdet?
+3. Best severity aggregation: fixed weights or learned from stress tests?
+4. Do we include Stage 3 in the mainline or keep it as appendix/future work?
+5. How many tokens to repair for best tradeoff (N=100? 500? 1000?)?
+6. Which semantic preservation constraint is sufficient (anchor only vs anchor+NN preserve vs logit preserve)?
+
+---
+
+## 22) “Definition of Done” (What counts as success)
+
+Minimum publishable result:
+- Diagnostic metrics + thresholds that identify a non-trivial subset of tokens.
+- Strong evidence that geometry metrics predict stress test failures beyond frequency/type.
+- Causal repair experiment showing:
+  - repaired tokens improve materially more than matched controls on stress tests
+  - downstream benchmark improvements (even modest) without major regressions
+- Full ablations + compute accounting + reproducible runs.
+
+---
+
+## Appendix A — Pseudocode Templates
+
+### A1) Stage 2 metric computation (displacement-based)
+```python
+# Inputs: normalized embeddings X (V,d), index for kNN queries
+# Output: dict of metrics per token
+
+neighbors = knn(index, X[t], k)  # excludes t
+Delta = X[neighbors] - X[t]      # (k,d)
+Delta_c = Delta - Delta.mean(axis=0, keepdims=True)
+
+C = (Delta_c.T @ Delta_c) / (k - 1)    # (d,d)
+eigvals = sorted(eig(C), reverse=True) # λ1..λd
+
+dim95 = min_m_for_variance(eigvals, tau=0.95)
+PR = (sum(eigvals)**2) / (sum([l*l for l in eigvals]) + eps)
+
+m = max(dim95, m_min)
+cond = (eigvals[0] + eps) / (eigvals[m-1] + eps)
+
+logdet = sum([log(l + eps) for l in eigvals])  # or top-m only
+````
+
+### A2) Repair loop (outer neighbors, inner optimization)
+
+```python
+x = X[t].copy()
+for outer in range(OUTER_ITERS):
+    N = knn(index, x, k)
+    # freeze N for inner loop
+    for step in range(INNER_STEPS):
+        loss = geom_loss(x, X[N]) + lambda_ * ||x - x0||^2 + ...
+        x = x - lr * grad(loss, x)
+        x = x / ||x||   # renormalize
+    # optionally rebuild index or query with updated x
+X_repaired[t] = x
+```
+
+---
+
+## Appendix B — Logging Schema (per run)
+
+* `run_id`
+* `model_id`, `tokenizer_id`, `embedding_matrix_id`
+* `index_type`, `index_params`, `seed`
+* `k`, `distance_metric`
+* `threshold_strategy` (quantiles)
+* `stage_flags[t]`
+* `metrics[t]`
+* `sev[t]`, `cons[t]`, `priority[t]`
+* repair config and per-token repair deltas
+* stress test results pre/post
+* benchmark results pre/post
+* regression suite results pre/post
+* compute timings and memory stats
+
+---
+
+## Appendix C — Claim Discipline (What we will and won’t claim)
+
+We WILL claim:
+
+* a measurable token-level diagnostic signal
+* causal improvements from targeted repairs vs matched controls
+* compute-aware pipeline with ablations
+
+We will NOT claim (unless proven):
+
+* universal “manifold correctness”
+* that topology metrics are necessary
+* that this fully explains reasoning errors
+
+---
+
+```
+
+If you want, I can also generate:
+- a matching `default.yaml` config template (Hydra-style),
+- a “paper skeleton” Markdown (NeurIPS-format outline + required figures/tables),
+- and a one-page experiment matrix (each experiment → hypothesis → variables → outputs → acceptance criteria).
+```

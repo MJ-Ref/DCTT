@@ -1,0 +1,54 @@
+# DCTT Root Configuration
+# Use Hydra's composition: python script.py model=qwen2_5_coder compute=local_m3
+
+defaults:
+  - model: qwen2_5_7b
+  - pipeline: full
+  - compute: local_m3
+  - experiment: census
+  - _self_
+
+# Global settings
+seed: 42
+debug: false
+
+# Output directory (Hydra will set this)
+output_dir: ${hydra:runtime.output_dir}
+
+# Reproducibility tracking
+tracking:
+  enabled: true
+  log_git_hash: true
+  log_env_hash: true
+  log_config_snapshot: true
+
+# Weights & Biases
+wandb:
+  enabled: true
+  project: "dctt"
+  entity: null  # Set via environment or override
+  tags: []
+  notes: ""
+
+# Neighborhood settings
+neighbors:
+  k: 50  # Default neighborhood size
+  k_variants: [25, 50, 100, 200]  # For consistency estimation
+  metric: "cos"  # cosine distance
+  exclude_self: true
+
+# Metric computation
+metrics:
+  eps: 1e-10  # Numerical stability
+  variance_threshold: 0.95  # For dim95 computation
+  m_min: 10  # Minimum effective dimension for condition number
+
+# Hydra configuration
+hydra:
+  run:
+    dir: outputs/runs/${now:%Y-%m-%d}/${now:%H-%M-%S}
+  sweep:
+    dir: outputs/sweeps/${now:%Y-%m-%d}/${now:%H-%M-%S}
+    subdir: ${hydra.job.num}
+  job:
+    chdir: false
