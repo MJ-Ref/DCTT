@@ -1,10 +1,11 @@
 ## Mock NeurIPS / DeepMind-style review of your DCTT work (based on `DCTT_Research_Specification.md` + `README.md` + code)
 
-> **UPDATE (2026-01-23):** Several major issues have been addressed:
-> - ✅ **Repair claim now supported** - Cluster-level repair achieves geometry improvement (cond ↓0.43)
+> **UPDATE (2026-01-24):** Progress on major issues:
+> - ✅ **Mechanistic repair claim supported** - Cluster repair improves geometry (cond ↓0.27 vs placebo ↑0.04)
 > - ✅ **API sync complete** - All experiment scripts use current API signatures
 > - ✅ **Predictive validity analysis** - Implemented with bootstrap CIs, ablation, within-bucket analysis
-> - ⏳ Causal experiment still in progress
+> - ⚠️ **Behavioral causal claim NOT YET supported** - DiD not significant with simulated outcomes
+> - ⏳ Need real stress tests with model inference for behavioral evidence
 > - ⏳ Multi-model comparison not yet done
 
 ### Summary
@@ -343,9 +344,13 @@ And one qualitative table:
 
 ~~* **Overall**: *Weak reject / borderline* (mainly because the repair claim is not yet supported and the causal evaluation story is incomplete end-to-end).~~
 
-> **UPDATE (2026-01-23):** With cluster-level repair validated and predictive validity analysis implemented:
-> * **Overall**: *Borderline accept* - Repair claim now supported with cluster-level approach; predictive validity analysis shows geometry predicts beyond confounds; remaining gap is causal experiment with stress tests.
-> * **To reach clear accept**: Complete Step 4 (causal experiment) and add multi-model evidence.
+> **UPDATE (2026-01-24):** With cluster-level repair and causal framework implemented:
+> * **Overall**: *Borderline* - Mechanistic repair claim supported (geometry improves vs placebo); predictive validity shows geometry predicts beyond confounds; behavioral causal claim NOT yet supported (DiD not significant).
+> * **To reach accept**:
+>   1. Run real stress tests with model inference (not simulated)
+>   2. Better matching: continuous confounds + baseline failure
+>   3. Proper inference: clusters as experimental unit (effective n=5)
+>   4. Multi-model evidence (Llama, Mistral)
 
 * **If reframed diagnostics-first + strong predictive validity across models**: this could plausibly move into *borderline accept* territory for an analysis-oriented venue/workshop, and potentially main-track if the results are unusually clean and the causal story is tight.
 

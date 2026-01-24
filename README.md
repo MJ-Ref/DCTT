@@ -243,7 +243,7 @@ Full vocabulary census on 152,064 tokens (3,584 dimensions):
 
 **Finding:** Single-token repair preserves semantics but doesn't improve geometry when neighborhoods are uniformly pathological.
 
-### Cluster-Level Repair Validation ✓ NEW
+### Cluster-Level Repair Validation ✓
 
 | Criterion | Status | Value |
 |-----------|--------|-------|
@@ -252,7 +252,16 @@ Full vocabulary census on 152,064 tokens (3,584 dimensions):
 | Semantic preservation | ✓ PASS | Jaccard = 0.836 |
 | Improvement rate | ✓ 100% | 5/5 clusters improved |
 
-**Key Finding:** Cluster-level repair successfully improves geometry by jointly optimizing connected components of pathological tokens.
+### Causal Experiment Results
+
+| Claim | Status | Evidence |
+|-------|--------|----------|
+| Geometry improves vs placebo | **✓ Supported** | Treatment cond -0.27 vs control +0.04 |
+| Behavior improves causally | ✗ Not yet | DiD not significant (p=0.81), simulated outcomes |
+
+**Supported Claim:** "Cluster-level repair improves local geometry (cond) relative to placebo with minimal embedding movement."
+
+**Not Yet Supported:** "Repair causally improves downstream behavior." Requires real stress tests with model inference, better matching, and larger samples.
 
 ## Project Status
 
@@ -272,7 +281,8 @@ This is a research codebase under active development. Current status:
 - [x] Single-token repair validation (negative result)
 - [x] **Cluster-level repair** (positive result - geometry improves!)
 - [x] **Predictive validity analysis** with confound controls
-- [ ] Causal experiment with stress test validation
+- [x] **Causal experiment framework** (mechanistic claim validated)
+- [ ] Causal behavioral evidence (needs real stress tests)
 - [ ] Multi-model comparison (Llama, Mistral)
 
 ## Citation
