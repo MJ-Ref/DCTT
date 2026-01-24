@@ -26,17 +26,16 @@ from typing import Any
 import hydra
 import numpy as np
 from omegaconf import DictConfig, OmegaConf
+from tqdm import tqdm
 
-from dctt.core.types import DiagnosticResult, TokenInfo, RepairConfig
-from dctt.embeddings.extract import EmbeddingExtractor
+from dctt.core.types import DiagnosticResult, TokenInfo, TokenType, FrequencyTier, RepairConfig
 from dctt.metrics.stage1 import compute_stage1_metrics
 from dctt.metrics.stage2 import compute_stage2_metrics
-from dctt.metrics.severity import SeverityScorer
 from dctt.neighbors.usearch_index import USearchIndex
-from dctt.repair.optimizer import RepairOptimizer
-from dctt.tracking.wandb_utils import WandbTracker
+from dctt.repair.optimizer import EmbeddingRepairOptimizer
 
-log = logging.getLogger(__name__)
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -77,15 +76,15 @@ def run_k_sweep_ablation(
     results = []
 
     for k in k_values:
-        log.info(f"Running ablation with k={k}")
+        logger.info(f"Running ablation with k={k}")
 
         # Build index
         index = USearchIndex(
-            dim=embeddings.shape[1],
-            metric=cfg.neighbors.metric,
-            seed=cfg.seed,
+            connectivity=cfg.compute.index.connectivity,
+            expansion_add=cfg.compute.index.expansion_add,
+            expansion_search=cfg.compute.index.expansion_search,
         )
-        index.build(embeddings)
+        index.build(embeddings, metric=cfg.neighbors.metric, seed=cfg.seed)
 
         # Compute metrics for sample tokens
         sample_size = min(500, len(token_infos))
@@ -96,16 +95,20 @@ def run_k_sweep_ablation(
         cond_values = []
         dim95_values = []
 
-        for idx in sample_indices:
+        for idx in tqdm(sample_indices, desc=f"k={k}"):
             token_id = token_infos[idx].token_id
-            embedding = embeddings[token_id]
 
-            neighbor_ids, distances = index.query(embedding, k=k + 1)
-            mask = neighbor_ids != token_id
-            neighbor_ids = neighbor_ids[mask][:k]
+            # Query neighbors (2D input required)
+            query_vec = embeddings[token_id].reshape(1, -1)
+            neighbor_ids, distances = index.query(query_vec, k=k, exclude_self=True)
+            neighbor_ids = neighbor_ids[0]
 
-            neighbor_embeddings = embeddings[neighbor_ids]
-            stage2 = compute_stage2_metrics(embedding, neighbor_embeddings)
+            # Stage 2 metrics
+            stage2 = compute_stage2_metrics(
+                embeddings=embeddings,
+                token_id=token_id,
+                neighbor_ids=neighbor_ids,
+            )
 
             pr_values.append(stage2.pr)
             cond_values.append(stage2.cond)
@@ -156,18 +159,27 @@ def run_stage_ablation(
     stage1_severities = []
     stage2_severities = []
 
-    for idx in sample_indices:
+    for idx in tqdm(sample_indices, desc="Stage ablation"):
         token_id = token_infos[idx].token_id
-        embedding = embeddings[token_id]
 
-        neighbor_ids, distances = index.query(embedding, k=k + 1)
-        mask = neighbor_ids != token_id
-        neighbor_ids = neighbor_ids[mask][:k]
-        distances = distances[mask][:k]
+        # Query neighbors
+        query_vec = embeddings[token_id].reshape(1, -1)
+        neighbor_ids, distances = index.query(query_vec, k=k, exclude_self=True)
+        neighbor_ids = neighbor_ids[0]
+        distances = distances[0]
 
-        stage1 = compute_stage1_metrics(distances)
-        neighbor_embeddings = embeddings[neighbor_ids]
-        stage2 = compute_stage2_metrics(embedding, neighbor_embeddings)
+        # Stage 1 metrics
+        stage1 = compute_stage1_metrics(
+            distances=distances,
+            token_id=token_id,
+        )
+
+        # Stage 2 metrics
+        stage2 = compute_stage2_metrics(
+            embeddings=embeddings,
+            token_id=token_id,
+            neighbor_ids=neighbor_ids,
+        )
 
         # Stage 1 severity (based on spread_q and mean distance)
         stage1_sev = stage1.spread_q + stage1.mu_k
@@ -220,74 +232,88 @@ def run_repair_loss_ablation(
         List of ablation results.
     """
     loss_variants = [
-        {"name": "cond_only", "geometry_weight": 1.0, "geometry_type": "cond"},
-        {"name": "logdet_only", "geometry_weight": 1.0, "geometry_type": "logdet"},
-        {"name": "pr_only", "geometry_weight": 1.0, "geometry_type": "pr"},
-        {"name": "combined", "geometry_weight": 1.0, "geometry_type": "combined"},
+        {"name": "cond_only", "geometry_loss": "cond"},
+        {"name": "logdet_only", "geometry_loss": "logdet"},
+        {"name": "pr_only", "geometry_loss": "pr"},
+        {"name": "combined", "geometry_loss": "combined"},
     ]
 
     results = []
+    k = cfg.neighbors.k
 
     # Select tokens to repair (high severity)
-    k = cfg.neighbors.k
+    logger.info("Selecting high-severity tokens for repair ablation...")
     severities = []
 
-    for token_info in token_infos[:1000]:
+    for token_info in tqdm(token_infos[:1000], desc="Computing severity"):
         token_id = token_info.token_id
-        embedding = embeddings[token_id]
 
-        neighbor_ids, distances = index.query(embedding, k=k + 1)
-        mask = neighbor_ids != token_id
-        neighbor_ids = neighbor_ids[mask][:k]
+        query_vec = embeddings[token_id].reshape(1, -1)
+        neighbor_ids, _ = index.query(query_vec, k=k, exclude_self=True)
+        neighbor_ids = neighbor_ids[0]
 
-        neighbor_embeddings = embeddings[neighbor_ids]
-        stage2 = compute_stage2_metrics(embedding, neighbor_embeddings)
+        stage2 = compute_stage2_metrics(
+            embeddings=embeddings,
+            token_id=token_id,
+            neighbor_ids=neighbor_ids,
+        )
         severities.append((token_id, stage2.cond - stage2.pr))
 
     severities.sort(key=lambda x: x[1], reverse=True)
     repair_token_ids = [s[0] for s in severities[:10]]
 
     for variant in loss_variants:
-        log.info(f"Running repair ablation: {variant['name']}")
+        logger.info(f"Running repair ablation: {variant['name']}")
 
         repair_config = RepairConfig(
-            lambda_anchor=cfg.repair.lambda_anchor,
-            lambda_nn_preserve=cfg.repair.lambda_nn_preserve,
-            delta_max=cfg.repair.delta_max,
-            outer_iterations=3,
-            inner_steps=50,
-            learning_rate=cfg.repair.learning_rate,
+            max_outer_iters=3,
+            max_inner_steps=50,
+            learning_rate=cfg.repair.get("learning_rate", 0.1),
+            lambda_anchor=cfg.repair.get("lambda_anchor", 0.1),
+            lambda_nn_preserve=cfg.repair.get("lambda_nn_preserve", 0.1),
+            delta_max=cfg.repair.get("delta_max", 0.2),
+            geometry_loss=variant["geometry_loss"],
         )
 
-        optimizer = RepairOptimizer(
-            embeddings=embeddings.copy(),
-            index=index,
-            config=repair_config,
-        )
+        optimizer = EmbeddingRepairOptimizer(repair_config)
 
         pre_metrics = []
         post_metrics = []
 
-        for token_id in repair_token_ids:
-            # Get pre-repair metrics
+        for token_id in tqdm(repair_token_ids, desc=f"Repair {variant['name']}"):
             embedding = embeddings[token_id]
-            neighbor_ids, _ = index.query(embedding, k=k + 1)
-            mask = neighbor_ids != token_id
-            neighbor_ids = neighbor_ids[mask][:k]
-            neighbor_embeddings = embeddings[neighbor_ids]
-            pre_stage2 = compute_stage2_metrics(embedding, neighbor_embeddings)
+
+            # Get neighbors
+            query_vec = embedding.reshape(1, -1)
+            neighbors, _ = index.query(query_vec, k=k, exclude_self=True)
+            neighbors = neighbors[0]
+
+            # Get pre-repair metrics
+            pre_stage2 = compute_stage2_metrics(
+                embeddings=embeddings,
+                token_id=token_id,
+                neighbor_ids=neighbors,
+            )
             pre_metrics.append({"cond": pre_stage2.cond, "pr": pre_stage2.pr})
 
             # Repair
-            result = optimizer.repair_token(token_id)
+            result = optimizer.repair(
+                embedding=embedding,
+                neighbors=neighbors,
+                all_embeddings=embeddings,
+                index=index,
+                k=k,
+            )
 
             # Get post-repair metrics
             repaired_embedding = result.repaired_embedding
-            neighbor_ids, _ = index.query(repaired_embedding, k=k + 1)
-            mask = neighbor_ids != token_id
-            neighbor_ids = neighbor_ids[mask][:k]
-            neighbor_embeddings = embeddings[neighbor_ids]
-            post_stage2 = compute_stage2_metrics(repaired_embedding, neighbor_embeddings)
+            new_neighbors, _ = index.query(repaired_embedding.reshape(1, -1), k=k, exclude_self=True)
+            new_neighbors = new_neighbors[0]
+            post_stage2 = compute_stage2_metrics(
+                embeddings=embeddings,
+                token_id=token_id,
+                neighbor_ids=new_neighbors,
+            )
             post_metrics.append({"cond": post_stage2.cond, "pr": post_stage2.pr})
 
         # Compute improvements
@@ -341,59 +367,76 @@ def run_anchor_sweep_ablation(
     severities = []
     for token_info in token_infos[:500]:
         token_id = token_info.token_id
-        embedding = embeddings[token_id]
 
-        neighbor_ids, _ = index.query(embedding, k=k + 1)
-        mask = neighbor_ids != token_id
-        neighbor_ids = neighbor_ids[mask][:k]
+        query_vec = embeddings[token_id].reshape(1, -1)
+        neighbor_ids, _ = index.query(query_vec, k=k, exclude_self=True)
+        neighbor_ids = neighbor_ids[0]
 
-        neighbor_embeddings = embeddings[neighbor_ids]
-        stage2 = compute_stage2_metrics(embedding, neighbor_embeddings)
+        stage2 = compute_stage2_metrics(
+            embeddings=embeddings,
+            token_id=token_id,
+            neighbor_ids=neighbor_ids,
+        )
         severities.append((token_id, stage2.cond))
 
     severities.sort(key=lambda x: x[1], reverse=True)
     repair_token_ids = [s[0] for s in severities[:5]]
 
     for lambda_anchor in lambda_values:
-        log.info(f"Running anchor sweep: lambda={lambda_anchor}")
+        logger.info(f"Running anchor sweep: lambda={lambda_anchor}")
 
         repair_config = RepairConfig(
+            max_outer_iters=3,
+            max_inner_steps=50,
+            learning_rate=cfg.repair.get("learning_rate", 0.1),
             lambda_anchor=lambda_anchor,
-            lambda_nn_preserve=cfg.repair.lambda_nn_preserve,
-            delta_max=cfg.repair.delta_max,
-            outer_iterations=3,
-            inner_steps=50,
-            learning_rate=cfg.repair.learning_rate,
+            lambda_nn_preserve=cfg.repair.get("lambda_nn_preserve", 0.1),
+            delta_max=cfg.repair.get("delta_max", 0.2),
+            geometry_loss="cond",
         )
 
-        optimizer = RepairOptimizer(
-            embeddings=embeddings.copy(),
-            index=index,
-            config=repair_config,
-        )
+        optimizer = EmbeddingRepairOptimizer(repair_config)
 
         deltas = []
         cond_improvements = []
 
         for token_id in repair_token_ids:
             original = embeddings[token_id].copy()
-            result = optimizer.repair_token(token_id)
+
+            # Get neighbors
+            query_vec = original.reshape(1, -1)
+            neighbors, _ = index.query(query_vec, k=k, exclude_self=True)
+            neighbors = neighbors[0]
+
+            # Get pre-repair cond
+            pre_stage2 = compute_stage2_metrics(
+                embeddings=embeddings,
+                token_id=token_id,
+                neighbor_ids=neighbors,
+            )
+            pre_cond = pre_stage2.cond
+
+            # Repair
+            result = optimizer.repair(
+                embedding=original,
+                neighbors=neighbors,
+                all_embeddings=embeddings,
+                index=index,
+                k=k,
+            )
 
             delta = np.linalg.norm(result.repaired_embedding - original)
             deltas.append(delta)
 
-            # Get pre/post cond
-            neighbor_ids, _ = index.query(original, k=k + 1)
-            mask = neighbor_ids != token_id
-            neighbor_ids = neighbor_ids[mask][:k]
-            neighbor_embeddings = embeddings[neighbor_ids]
-            pre_cond = compute_stage2_metrics(original, neighbor_embeddings).cond
-
-            neighbor_ids, _ = index.query(result.repaired_embedding, k=k + 1)
-            mask = neighbor_ids != token_id
-            neighbor_ids = neighbor_ids[mask][:k]
-            neighbor_embeddings = embeddings[neighbor_ids]
-            post_cond = compute_stage2_metrics(result.repaired_embedding, neighbor_embeddings).cond
+            # Get post-repair cond
+            new_neighbors, _ = index.query(result.repaired_embedding.reshape(1, -1), k=k, exclude_self=True)
+            new_neighbors = new_neighbors[0]
+            post_stage2 = compute_stage2_metrics(
+                embeddings=embeddings,
+                token_id=token_id,
+                neighbor_ids=new_neighbors,
+            )
+            post_cond = post_stage2.cond
 
             cond_improvements.append(pre_cond - post_cond)
 
@@ -415,64 +458,126 @@ def run_anchor_sweep_ablation(
 @hydra.main(version_base=None, config_path="../configs", config_name="config")
 def main(cfg: DictConfig) -> None:
     """Main entry point for ablation suite."""
-    log.info("Starting ablation suite")
-    log.info(f"Config:\n{OmegaConf.to_yaml(cfg)}")
+    logger.info("Starting ablation suite")
+    logger.info(f"Config:\n{OmegaConf.to_yaml(cfg)}")
 
-    # Initialize tracking
-    tracker = WandbTracker(
-        project=cfg.tracking.project,
-        experiment_name="ablation_suite",
-        config=OmegaConf.to_container(cfg, resolve=True),
-    )
+    # Set seeds
+    from dctt.tracking.reproducibility import set_all_seeds
+    set_all_seeds(cfg.seed)
+
+    # Initialize W&B if enabled
+    run = None
+    if cfg.wandb.enabled:
+        from dctt.tracking.wandb_utils import init_wandb_from_hydra
+        run = init_wandb_from_hydra(cfg, tags=["ablation_suite"])
 
     try:
-        # Extract embeddings
-        log.info("Extracting embeddings...")
-        extractor = EmbeddingExtractor(cfg.model.name)
-        embeddings, tokenizer = extractor.extract()
-        embeddings = embeddings / np.linalg.norm(embeddings, axis=1, keepdims=True)
+        # Load cached embeddings or extract
+        from dctt.embeddings import extract_embeddings
+        from dctt.embeddings.normalize import normalize_embeddings
+        from dctt.embeddings.cache import EmbeddingCache
 
-        # Build index
-        log.info("Building kNN index...")
-        index = USearchIndex(
-            dim=embeddings.shape[1],
-            metric=cfg.neighbors.metric,
-            seed=cfg.seed,
+        cache_dir = Path(__file__).parent.parent / "outputs" / "embeddings"
+        cache = EmbeddingCache(str(cache_dir))
+        cache_key = cache.make_key(cfg.model.name, cfg.model.revision)
+
+        if cache.has(cache_key):
+            logger.info("Loading embeddings from cache")
+            embeddings, metadata = cache.load(cache_key)
+        else:
+            logger.info("Extracting embeddings from model")
+            embeddings_raw, tokenizer = extract_embeddings(
+                model_name=cfg.model.name,
+                revision=cfg.model.revision,
+                device=cfg.compute.device,
+                torch_dtype=cfg.model.torch_dtype,
+            )
+            embeddings, _ = normalize_embeddings(embeddings_raw, return_norms=True)
+            from dctt.embeddings import get_embedding_info
+            info = get_embedding_info(embeddings, cfg.model.name, cfg.model.revision)
+            cache.save(cache_key, embeddings, info)
+
+        vocab_size, embedding_dim = embeddings.shape
+        logger.info(f"Embeddings: {vocab_size} x {embedding_dim}")
+
+        # Load tokenizer
+        from transformers import AutoTokenizer
+        tokenizer = AutoTokenizer.from_pretrained(
+            cfg.model.name,
+            trust_remote_code=cfg.model.tokenizer.trust_remote_code,
         )
-        index.build(embeddings)
 
-        # Get token info
-        vocab_size = len(tokenizer)
+        # Build or load index
+        index_cache_dir = Path(__file__).parent.parent / "outputs" / "indices"
+        index_cache_path = index_cache_dir / f"{cache_key}_{cfg.neighbors.metric}.usearch"
+
+        index = USearchIndex(
+            connectivity=cfg.compute.index.connectivity,
+            expansion_add=cfg.compute.index.expansion_add,
+            expansion_search=cfg.compute.index.expansion_search,
+        )
+
+        if index_cache_path.exists():
+            logger.info(f"Loading index from {index_cache_path}")
+            index.load(str(index_cache_path))
+        else:
+            logger.info("Building kNN index...")
+            index.build(embeddings, metric=cfg.neighbors.metric, seed=cfg.seed)
+            index_cache_dir.mkdir(parents=True, exist_ok=True)
+            index.save(str(index_cache_path))
+
+        # Get token info with real strings
+        logger.info("Building token info...")
         token_infos = []
         for token_id in range(vocab_size):
-            token_str = tokenizer.decode([token_id])
+            try:
+                token_str = tokenizer.decode([token_id])
+            except:
+                token_str = f"<token_{token_id}>"
+
+            # Simple token type classification
+            if token_str.strip() == "":
+                token_type = TokenType.WHITESPACE
+            elif token_str.isalpha():
+                token_type = TokenType.FULL_WORD
+            elif token_str.isdigit():
+                token_type = TokenType.NUMERIC
+            elif token_str in "{}[]()<>":
+                token_type = TokenType.CODE_SYMBOL
+            elif not token_str.isalnum() and len(token_str.strip()) <= 2:
+                token_type = TokenType.PUNCTUATION
+            else:
+                token_type = TokenType.SUBWORD
+
             token_infos.append(TokenInfo(
                 token_id=token_id,
-                token_string=token_str,
-                frequency=1,
-                token_type="unknown",
+                token_str=token_str,
+                token_type=token_type,
+                frequency=1.0,
+                frequency_tier=FrequencyTier.MID,
+                norm=1.0,
             ))
 
         # Run ablations
         all_results = AblationSuiteResult()
 
         # K sweep
-        log.info("Running k-sweep ablation...")
+        logger.info("Running k-sweep ablation...")
         k_results = run_k_sweep_ablation(cfg, embeddings, token_infos)
         all_results.ablations.extend(k_results)
 
         # Stage ablation
-        log.info("Running stage ablation...")
+        logger.info("Running stage ablation...")
         stage_results = run_stage_ablation(cfg, embeddings, index, token_infos)
         all_results.ablations.extend(stage_results)
 
         # Repair loss ablation
-        log.info("Running repair loss ablation...")
+        logger.info("Running repair loss ablation...")
         repair_results = run_repair_loss_ablation(cfg, embeddings, index, token_infos)
         all_results.ablations.extend(repair_results)
 
         # Anchor sweep
-        log.info("Running anchor sweep ablation...")
+        logger.info("Running anchor sweep ablation...")
         anchor_results = run_anchor_sweep_ablation(cfg, embeddings, index, token_infos)
         all_results.ablations.extend(anchor_results)
 
@@ -483,12 +588,14 @@ def main(cfg: DictConfig) -> None:
         }
 
         # Log to tracker
-        for result in all_results.ablations:
-            for metric_name, metric_value in result.metrics.items():
-                tracker.log({f"{result.name}/{metric_name}": metric_value})
+        if run is not None:
+            import wandb
+            for result in all_results.ablations:
+                for metric_name, metric_value in result.metrics.items():
+                    wandb.log({f"{result.name}/{metric_name}": metric_value})
 
         # Save results
-        output_dir = Path(cfg.output_dir) / "ablation_suite"
+        output_dir = Path(cfg.output_dir)
         output_dir.mkdir(parents=True, exist_ok=True)
 
         results_dict = {
@@ -505,14 +612,16 @@ def main(cfg: DictConfig) -> None:
             "summary": all_results.summary,
         }
 
-        with open(output_dir / "results.json", "w") as f:
+        with open(output_dir / "ablation_results.json", "w") as f:
             json.dump(results_dict, f, indent=2)
 
-        log.info(f"Results saved to {output_dir}")
-        log.info(f"Completed {len(all_results.ablations)} ablations")
+        logger.info(f"Results saved to {output_dir}")
+        logger.info(f"Completed {len(all_results.ablations)} ablations")
 
     finally:
-        tracker.finish()
+        if run is not None:
+            from dctt.tracking.wandb_utils import finish_run
+            finish_run()
 
 
 if __name__ == "__main__":

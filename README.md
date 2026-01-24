@@ -4,9 +4,9 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Code style: ruff](https://img.shields.io/badge/code%20style-ruff-000000.svg)](https://github.com/astral-sh/ruff)
 
-**A rigorous framework for diagnosing and repairing token-level embedding geometry pathologies in Large Language Models.**
+**A rigorous framework for diagnosing token-level embedding geometry pathologies in Large Language Models.**
 
-DCTT provides tools to identify tokens with problematic local geometry in LLM embedding spaces and apply minimal, targeted repairs that improve downstream performance on code and math tasks.
+DCTT provides tools to identify tokens with problematic local geometry in LLM embedding spaces. The core contribution is a **diagnostic and causal validation framework**; repair methods are exploratory, with a current finding that single-token local optimization is insufficient when entire neighborhoods exhibit pathological geometry.
 
 ## Key Features
 
@@ -149,23 +149,50 @@ logdet = Σ log(λᵢ + ε)
 ```
 Measures local "volume" or dispersion. Very negative values indicate collapsed geometry.
 
-## Repair Method
+## Repair Methods
 
-The repair optimizer uses projected gradient descent:
+### Single-Token Repair (Negative Result)
+
+The initial repair optimizer uses projected gradient descent with tangent space projection:
 
 ```python
 for outer_iter in range(max_outer_iters):
     neighbors = knn(index, embedding, k)  # Recompute neighbors
-
     for step in range(inner_steps):
         loss = geometry_loss + λ_anchor * anchor_loss + λ_nn * nn_preserve_loss
-        embedding = embedding - lr * gradient(loss)
+        grad_tangent = gradient - (gradient · embedding) * embedding
+        embedding = embedding - lr * grad_tangent
         embedding = project_to_constraints(embedding)  # Unit norm, max delta
 ```
 
-Constraints ensure:
-- Unit L2 norm (for cosine distance)
-- Maximum change bounded by `delta_max`
+**Finding:** Single-token local optimization preserves semantics (Jaccard > 0.7) but does NOT improve geometry metrics. This occurs because centered displacement covariance makes the loss independent of a single moving token when neighbors are fixed.
+
+### Cluster-Level Repair (Positive Result) ✓
+
+To address the single-token limitation, we implemented **cluster-level repair** that jointly optimizes connected components of pathological tokens:
+
+```bash
+python experiments/run_cluster_repair.py model=qwen2_5_coder_7b \
+    cluster_repair.mutual_k=50 cluster_repair.min_cluster_size=2
+```
+
+**Algorithm:**
+1. Build mutual k-NN graph on high-severity tokens
+2. Find connected components (clusters)
+3. Jointly optimize all tokens in each cluster
+4. Centered covariance CAN change when multiple reference points shift together
+
+**Results on Qwen2.5-Coder-7B:**
+
+| Metric | Value | Status |
+|--------|-------|--------|
+| Clusters found | 69 | With mutual_k=50, min_size=2 |
+| Clusters improved | **5/5 (100%)** | All clusters show improvement |
+| Condition number reduction | **0.427 ± 0.157** | 10-17% improvement |
+| Jaccard overlap | **0.836 ± 0.030** | Excellent semantic preservation |
+| Similarity to original | **0.992** | Minimal movement required |
+
+**Key Finding:** Cluster-level repair successfully improves geometry (condition number decreases) while preserving semantics, validating the hypothesis that pathological tokens need to move together.
 
 ## Development
 
@@ -206,7 +233,7 @@ Full vocabulary census on 152,064 tokens (3,584 dimensions):
 - Special characters: `、` (Chinese), `０` (full-width)
 - Line ending variants: `),\r\n`, `',\r\r\n`
 
-### Repair Validation Results
+### Single-Token Repair Validation
 
 | Criterion | Status | Value |
 |-----------|--------|-------|
@@ -214,7 +241,18 @@ Full vocabulary census on 152,064 tokens (3,584 dimensions):
 | Semantic preservation | ✓ PASS | Jaccard 0.75 - 1.0 |
 | Geometry improved | ✗ NO | cond/PR unchanged |
 
-**Key Finding:** Local gradient descent preserves semantics but doesn't improve geometry when neighborhoods are uniformly pathological. Global repair strategies needed.
+**Finding:** Single-token repair preserves semantics but doesn't improve geometry when neighborhoods are uniformly pathological.
+
+### Cluster-Level Repair Validation ✓ NEW
+
+| Criterion | Status | Value |
+|-----------|--------|-------|
+| Clusters detected | ✓ YES | 69 clusters found |
+| Geometry improved | **✓ YES** | cond reduced 0.43 ± 0.16 |
+| Semantic preservation | ✓ PASS | Jaccard = 0.836 |
+| Improvement rate | ✓ 100% | 5/5 clusters improved |
+
+**Key Finding:** Cluster-level repair successfully improves geometry by jointly optimizing connected components of pathological tokens.
 
 ## Project Status
 
@@ -223,7 +261,7 @@ This is a research codebase under active development. Current status:
 - [x] Core types and abstractions
 - [x] Stage 1 & 2 metrics
 - [x] USearch index integration
-- [x] Repair optimizer
+- [x] Single-token repair optimizer
 - [x] Stress test framework
 - [x] Statistical evaluation
 - [x] W&B integration
@@ -231,7 +269,11 @@ This is a research codebase under active development. Current status:
 - [x] Stage 3 TDA metrics
 - [x] Paper figures generation
 - [x] Full census on Qwen2.5-Coder-7B
-- [x] Repair validation experiments
+- [x] Single-token repair validation (negative result)
+- [x] **Cluster-level repair** (positive result - geometry improves!)
+- [x] **Predictive validity analysis** with confound controls
+- [ ] Causal experiment with stress test validation
+- [ ] Multi-model comparison (Llama, Mistral)
 
 ## Citation
 

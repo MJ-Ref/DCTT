@@ -48,6 +48,31 @@ repair_validation:
   n_tokens: 10  # Number of tokens to repair
   n_diagnostic_samples: 5000  # Sample size for diagnostic
 
+# Predictive validity settings
+predictive_validity:
+  n_bootstrap: 100  # Bootstrap samples for confidence intervals
+  failure_threshold: 0.3  # Threshold for binarizing failure rate
+  use_simulated_failures: true  # Use simulated failures for testing
+
+# Repair settings
+repair:
+  learning_rate: 0.1
+  lambda_anchor: 0.1
+  lambda_nn_preserve: 0.1
+  delta_max: 0.2
+
+# Cluster repair settings
+cluster_repair:
+  n_top_tokens: 200  # Top severity tokens to consider
+  n_diagnostic_samples: 5000  # Sample for finding high-severity tokens
+  mutual_k: 20  # k for mutual k-NN graph
+  min_cluster_size: 3  # Minimum tokens to form a cluster
+  max_outer_iters: 3
+  max_inner_steps: 50
+  learning_rate: 0.05
+  lambda_anchor: 0.5
+  delta_max: 0.15
+
 # Metric computation
 metrics:
   eps: 1e-10  # Numerical stability
