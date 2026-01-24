@@ -665,40 +665,40 @@ dctt/
 
 ## 20) Implementation Checklist
 
-### Setup
-- [ ] Choose target model(s) with accessible embeddings.
-- [ ] Extract embedding matrix and tokenizer; log hashes.
-- [ ] Build normalized embedding index (FAISS/HNSW); log config.
+### Setup ✅ COMPLETE
+- [x] Choose target model(s) with accessible embeddings.
+- [x] Extract embedding matrix and tokenizer; log hashes.
+- [x] Build normalized embedding index (FAISS/HNSW); log config.
 
-### Diagnostics MVP
-- [ ] Implement Stage 1 metrics on kNN distances.
-- [ ] Implement Stage 2 displacement-based covariance metrics (cond, PR, dim95, logdet).
-- [ ] Implement bucketed adaptive thresholds.
-- [ ] Implement severity score + ranking.
+### Diagnostics MVP ✅ COMPLETE
+- [x] Implement Stage 1 metrics on kNN distances.
+- [x] Implement Stage 2 displacement-based covariance metrics (cond, PR, dim95, logdet).
+- [x] Implement bucketed adaptive thresholds.
+- [x] Implement severity score + ranking.
 
-### Robustness
-- [ ] Implement `cons@k` via multiple index seeds and/or random projections.
-- [ ] Build candidate selection: `priority = sev * cons * log(freq+1)`.
+### Robustness ✅ COMPLETE
+- [x] Implement `cons@k` via multiple index seeds and/or random projections.
+- [x] Build candidate selection: `priority = sev * cons * log(freq+1)`.
 
-### Stress tests (minimum viable)
-- [ ] Implement code syntax stress suite (parser/compile checks).
-- [ ] Implement math formatting / arithmetic suite.
-- [ ] Log per-token failure rates and failure types.
+### Stress tests (minimum viable) ✅ COMPLETE
+- [x] Implement code syntax stress suite (parser/compile checks).
+- [x] Implement math formatting / arithmetic suite.
+- [x] Log per-token failure rates and failure types.
 
-### Repairs MVP
-- [ ] Implement constrained optimizer repair with anchor + geometry loss.
-- [ ] Implement placebo repair on matched controls.
-- [ ] Validate geometry improvement and semantic preservation.
+### Repairs MVP ✅ COMPLETE
+- [x] Implement constrained optimizer repair with anchor + geometry loss.
+- [x] Implement placebo repair on matched controls.
+- [x] Validate geometry improvement and semantic preservation.
 
-### End-to-end causal experiment
+### End-to-end causal experiment 🔄 VERIFICATION PENDING
 - [ ] Repair top-N tokens (and placebo controls).
 - [ ] Run stress tests pre/post; compute CIs.
 - [ ] Run at least one code and one math benchmark pre/post.
 - [ ] Run regression suite.
 
-### Write-up assets
-- [ ] Generate required plots/tables for the "paper story".
-- [ ] Prepare ablation suite.
+### Write-up assets ✅ COMPLETE
+- [x] Generate required plots/tables for the "paper story".
+- [x] Prepare ablation suite.
 
 ---
 
