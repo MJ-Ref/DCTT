@@ -95,18 +95,18 @@ class GeometryLoss(RepairLoss):
         Returns:
             Loss value (lower is better).
         """
-        # Compute displacement matrix
+        # Compute displacement matrix (neighbor - token)
         displacement = neighbor_embeddings - embedding
 
-        # Center displacements
-        displacement_centered = displacement - displacement.mean(axis=0)
-
-        # Compute covariance
+        # Note: We don't center here because centering removes the dependency
+        # on the token embedding (the gradient becomes zero).
+        # The uncentered covariance captures how spread out the neighbors are
+        # relative to the query token.
         k = displacement.shape[0]
-        covariance = (displacement_centered.T @ displacement_centered) / (k - 1)
+        gram_matrix = (displacement @ displacement.T) / k
 
         # Get eigenvalues
-        eigenvalues = np.linalg.eigvalsh(covariance)
+        eigenvalues = np.linalg.eigvalsh(gram_matrix)
         eigenvalues = np.maximum(eigenvalues, self.eps)
         eigenvalues = np.sort(eigenvalues)[::-1]
 

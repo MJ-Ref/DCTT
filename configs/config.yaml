@@ -43,6 +43,11 @@ stress_test:
   n_prompts: 5  # Prompts per token
   use_mock: false  # Use mock model for testing
 
+# Repair validation settings
+repair_validation:
+  n_tokens: 10  # Number of tokens to repair
+  n_diagnostic_samples: 5000  # Sample size for diagnostic
+
 # Metric computation
 metrics:
   eps: 1e-10  # Numerical stability

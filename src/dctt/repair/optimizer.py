@@ -114,12 +114,19 @@ class EmbeddingRepairOptimizer:
             # Inner loop: gradient descent
             for inner_step in range(self.config.max_inner_steps):
                 # Compute loss and gradient
-                loss, _ = self.loss_fn.compute(
+                loss, components = self.loss_fn.compute(
                     current_embedding, original_embedding, neighbor_embeddings
                 )
                 gradient = self.loss_fn.gradient(
                     current_embedding, original_embedding, neighbor_embeddings
                 )
+
+                grad_norm = np.linalg.norm(gradient)
+
+                # Debug logging for first few iterations
+                if total_iterations < 3:
+                    logger.debug(f"Iter {total_iterations}: loss={loss:.6f}, grad_norm={grad_norm:.6f}")
+                    logger.debug(f"  Components: {components}")
 
                 loss_history.append(loss)
                 total_iterations += 1
@@ -131,8 +138,12 @@ class EmbeddingRepairOptimizer:
                         converged = True
                         break
 
-                # Gradient step
-                current_embedding = current_embedding - self.config.learning_rate * gradient
+                # Project gradient to tangent space of unit sphere before step
+                # This ensures the update stays on the manifold
+                grad_tangent = gradient - np.dot(gradient, current_embedding) * current_embedding
+
+                # Gradient step on tangent space
+                current_embedding = current_embedding - self.config.learning_rate * grad_tangent
 
                 # Project to constraints
                 current_embedding = self._project_constraints(
@@ -229,19 +240,16 @@ class EmbeddingRepairOptimizer:
         Returns:
             Dictionary of metric values.
         """
-        # Create temporary embedding matrix with modified embedding
-        temp_embeddings = all_embeddings.copy()
-        # We need a way to identify which token this is
-        # For now, compute metrics directly
-
         neighbor_embeddings = all_embeddings[neighbors]
         displacement = neighbor_embeddings - embedding
         displacement_centered = displacement - displacement.mean(axis=0)
 
         k = displacement.shape[0]
-        covariance = (displacement_centered.T @ displacement_centered) / (k - 1)
+        # Use k×k Gram matrix for efficiency (same non-zero eigenvalues as d×d)
+        # This is O(k³) instead of O(d³) when k << d
+        gram_matrix = (displacement_centered @ displacement_centered.T) / (k - 1)
 
-        eigenvalues = np.linalg.eigvalsh(covariance)
+        eigenvalues = np.linalg.eigvalsh(gram_matrix)
         eigenvalues = np.maximum(eigenvalues, self.config.eps)
         eigenvalues = np.sort(eigenvalues)[::-1]
 
