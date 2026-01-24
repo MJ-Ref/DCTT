@@ -37,6 +37,12 @@ neighbors:
   metric: "ip"  # inner product (for normalized vectors, equivalent to cosine)
   exclude_self: true
 
+# Stress test settings
+stress_test:
+  n_tokens: 50  # Number of high/low severity tokens to test
+  n_prompts: 5  # Prompts per token
+  use_mock: false  # Use mock model for testing
+
 # Metric computation
 metrics:
   eps: 1e-10  # Numerical stability
