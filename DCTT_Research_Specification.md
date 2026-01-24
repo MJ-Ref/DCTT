@@ -1,12 +1,7 @@
-Built directly from your early DCTT draft: 
-
-```markdown
-# DCTT Research Foundation
-**Project:** Discrete-to-Continuous Transition Testing (DCTT) for LLM Embedding Geometry  
-**Status:** Foundational spec (living document)  
-**Primary artifact:** `EmbeddingGeometry.md` (this file)  
-**Owner:** (you)  
-**Last updated:** 2026-01-23  
+# DCTT Research Specification
+**Project:** Discrete-to-Continuous Transition Testing (DCTT) for LLM Embedding Geometry
+**Status:** Foundational specification (living document)
+**Primary Artifact:** Research specification and implementation framework
 
 ---
 
@@ -14,13 +9,13 @@ Built directly from your early DCTT draft:
 
 **Goal:** Build a *rigorous, reproducible* framework to (1) diagnose token-level embedding geometry pathologies and (2) apply *minimal, localized repairs* that yield measurable improvements on downstream tasks (especially code and math), while preventing regressions on general language behavior.
 
-**Core contribution we aim to formalize:**
-1. **Diagnostics:** A staged token screening pipeline (cheap → expensive) that identifies local neighborhood degeneracies and assigns a robust severity score (incl. a consistency metric `cons@k`).
+**Core contributions:**
+1. **Diagnostics:** A staged token screening pipeline (cheap → expensive) that identifies local neighborhood degeneracies and assigns a robust severity score (including a consistency metric `cons@k`).
 2. **Causal evaluation:** Token-level stress tests + matched controls to show geometry issues predict and *cause* downstream failures beyond confounds (frequency, token type).
 3. **Repairs:** Minimal embedding edits for a small subset of problematic tokens that improve geometry and downstream outcomes without broad model degradation.
 4. **Reproducibility:** A full experiment suite with ablations, compute accounting, and statistical confidence.
 
-**Key design principle:** This project must survive a skeptical reviewer: *no hand-wavy “geometry seems bad.”* Every claim must be tied to (a) stable metrics, (b) confound controls, and (c) causal interventions.
+**Key design principle:** This project must survive a skeptical reviewer: *no hand-wavy "geometry seems bad."* Every claim must be tied to (a) stable metrics, (b) confound controls, and (c) causal interventions.
 
 ---
 
@@ -29,18 +24,18 @@ Built directly from your early DCTT draft:
 ### 1.1 In Scope
 - Token embedding matrix analysis (input embeddings and/or tied embeddings).
 - Local neighborhood geometry (kNN-based) and its relationship to downstream failure modes.
-- Minimal token embedding repairs (editing a small subset of token vectors) under a “frozen model” setting.
+- Minimal token embedding repairs (editing a small subset of token vectors) under a "frozen model" setting.
 - Optional: further fine-tuning after embedding edits as a secondary result (clearly separated).
 
 ### 1.2 Out of Scope (for the first strong paper)
-- Tokenizer/vocabulary changes that require re-tokenization and retraining (can be future work).
+- Tokenizer/vocabulary changes that require re-tokenization and retraining (future work).
 - Heavy model retraining or architecture changes.
-- Claims about “reasoning” beyond what the benchmarks objectively measure.
+- Claims about "reasoning" beyond what the benchmarks objectively measure.
 
 ### 1.3 Non-goals
-- Not trying to “make embeddings orthonormal globally.”
-- Not trying to “prove” a universal theorem about embedding manifolds.
-- Not trying to maximize novelty via complex math if it doesn’t move results.
+- Not trying to "make embeddings orthonormal globally."
+- Not trying to "prove" a universal theorem about embedding manifolds.
+- Not trying to maximize novelty via complex math if it doesn't move results.
 
 ---
 
@@ -69,14 +64,14 @@ Built directly from your early DCTT draft:
 - **Vocabulary**: `V` tokens.
 - **Embedding dimension**: `d`.
 - **Embedding matrix**: `E ∈ R^{V×d}` where `E[t] = e_t`.
-- **Tokenizer**: maps text → token IDs; we assume stable ID mapping for a given model.
-- **Token frequency**: `f_t` measured from a corpus relevant to the model’s domain (or a proxy like tokenizer training stats if available).
+- **Tokenizer**: maps text → token IDs; stable ID mapping assumed for a given model.
+- **Token frequency**: `f_t` measured from a corpus relevant to the model's domain (or a proxy like tokenizer training stats if available).
 
 ### 3.2 Token Types (initial)
 - `full_word`: alphabetic words or common tokens that map to whole words
 - `subword`: BPE pieces, word fragments
 - `special`: BOS/EOS, whitespace, control tokens, etc.
-- (Optional) add `punctuation`, `numeric`, `code_symbol` if you can classify reliably.
+- (Optional) add `punctuation`, `numeric`, `code_symbol` if reliably classifiable.
 
 ### 3.3 Distances
 Embedding spaces are often anisotropic. Choose a default distance and justify it.
@@ -96,11 +91,11 @@ Avoid radius-based neighborhoods as the default (unstable in high-dim). Prefer f
 - **kNN neighborhood:** `N_k(t)` = the set of k nearest neighbors of token `t` in embedding space.
 - Typical choices: `k ∈ {25, 50, 100, 200}`.
 
-**If you keep radius neighborhoods:**
+**If radius neighborhoods are kept:**
 - Define radius `r_t` using a global statistic such as the median distance to the kth neighbor, so it scales across tokens.
 
 ### 3.5 Local geometry matrix options (important)
-Your diagnostic/repair must be defined so that editing `e_t` meaningfully changes the metric.
+Diagnostics and repairs must be defined so that editing `e_t` meaningfully changes the metric.
 
 Two common choices:
 
@@ -112,9 +107,9 @@ Two common choices:
 #### Option B — Displacement matrix (recommended)
 `Δ = [e_{n1}-e_t, ..., e_{nk}-e_t]^T ∈ R^{k×d}`
 
-This makes “local shape around t” explicit, and editing `e_t` affects all rows.
+This makes "local shape around t" explicit, and editing `e_t` affects all rows.
 
-**We will standardize on Option B for Stage 2+ repairs** unless a specific metric demands Option A.
+**Standardization: Option B for Stage 2+ repairs** unless a specific metric demands Option A.
 
 ### 3.6 Centering
 When computing SVD/covariance, define centering explicitly:
@@ -124,11 +119,11 @@ When computing SVD/covariance, define centering explicitly:
 ### 3.7 Condition number
 For covariance `C` (PSD), define:
 - eigenvalues `λ1 ≥ ... ≥ λd ≥ 0`
-- `cond(C) = (λ1 + ε) / (λd_eff + ε)`  
-where `λd_eff` is the smallest *meaningful* eigenvalue (see “effective rank” section) to reduce numerical artifacts.
+- `cond(C) = (λ1 + ε) / (λd_eff + ε)`
+where `λd_eff` is the smallest *meaningful* eigenvalue (see "effective rank" section) to reduce numerical artifacts.
 
 ### 3.8 Effective rank / intrinsic dimension
-You need a stable “local dimension” estimate.
+A stable "local dimension" estimate is required.
 
 Options:
 1. **PCA explained variance dimension**:
@@ -139,7 +134,7 @@ Options:
    - `p_i = λi / Σ λi`
    - `r_eff = exp( -Σ p_i log p_i )`
 
-We will implement at least (1) and (2), use (3) as optional.
+Implementation requirement: at least (1) and (2), with (3) as optional.
 
 ---
 
@@ -164,7 +159,7 @@ For each token `t`, compute:
 ## 5) Stage 0 — Preprocessing (Mandatory)
 
 ### 5.1 Extract embeddings
-Define exactly which matrix you use:
+Define exactly which matrix is used:
 - Input token embeddings (`model.embed_tokens.weight`)
 - Output embeddings / LM head (if untied)
 - If tied, same weights.
@@ -241,7 +236,7 @@ Compute covariance:
 2. **Participation ratio**
    - `PR(t) = (Σ λi)^2 / Σ λi^2`
 3. **Local condition number (robust)**
-   - `cond(t) = (λ1 + ε) / (λ_{m} + ε)`  
+   - `cond(t) = (λ1 + ε) / (λ_{m} + ε)`
      where `m = max(dim95(t), m_min)` and `m_min` e.g. 10 to avoid dividing by tiny eigenvalues due to noise.
 4. **Log-volume / dispersion**
    - `logdet(C + εI)` (or sum log(λi+ε))
@@ -260,7 +255,7 @@ Flag if any of:
 **All thresholds are adaptive** (see Section 9).
 
 ### 7.4 Severity score (continuous)
-We need a severity score that supports ranking and selecting top offenders.
+A severity score that supports ranking and selecting top offenders is required.
 
 Example:
 - Normalize each metric within its bucket using robust z-scores:
@@ -286,7 +281,7 @@ Stage 3 stays ONLY if it provides measurable incremental value.
 - Often more stable than box-counting in high dimension.
 
 #### B) Persistent homology (TDA)
-If you keep it:
+If kept:
 - Operate on a **projected** neighborhood:
   - Random projection to `p=20–50` dims or PCA to top `p` components.
 - Subsample neighbors to `k_sub=50–100`.
@@ -327,9 +322,9 @@ At minimum: `full_word`, `subword`, `special`.
 
 ### 9.3 Threshold computation
 For each bucket `b`, compute robust thresholds:
-- For “large is bad” metrics (cond, μ_k, spread_q):
+- For "large is bad" metrics (cond, μ_k, spread_q):
   - `thr_b = quantile(m in b, 0.99)` or `0.995`
-- For “small is bad” metrics (PR, logdet):
+- For "small is bad" metrics (PR, logdet):
   - `thr_b = quantile(m in b, 0.01)` or `0.005`
 
 Optionally calibrate thresholds via a held-out token stress dataset:
@@ -357,22 +352,22 @@ Define:
 Treat failures as Bernoulli:
 - posterior `p_t ~ Beta(1+fails, 1+(k-fails))`
 - report `E[p_t]` and credible interval
-This helps defend decisions like “cons@k > 0.8”.
+This helps defend decisions like "cons@k > 0.8".
 
 ### 10.3 How `cons@k` is used
 Select repair candidates using both severity and consistency:
-- `priority(t) = sev(t) * cons@k(t) * g(f_t)`  
+- `priority(t) = sev(t) * cons@k(t) * g(f_t)`
 where `g(f_t)` is an importance weight (e.g., `log(f_t+1)`).
 
 ---
 
 ## 11) Token Stress Tests (Critical for Causality)
 
-Global benchmarks are too noisy to establish token-level causality. We need micro tests that isolate token effects.
+Global benchmarks are too noisy to establish token-level causality. Micro tests that isolate token effects are required.
 
 ### 11.1 Stress test principles
 - Each test suite targets a token class (code punctuation, math operators, whitespace tokens, etc.).
-- A token is “in play” when the prompt strongly encourages or requires it.
+- A token is "in play" when the prompt strongly encourages or requires it.
 - Evaluation produces:
   - failure type (syntax error, wrong numeric answer, formatting violation)
   - pass/fail
@@ -408,8 +403,8 @@ Global benchmarks are too noisy to establish token-level causality. We need micr
 
 **Output:** `math_fail_rate(t)`.
 
-#### C) “Forced token” tests (harder, but powerful)
-If you can use constrained decoding or edit-distance objectives:
+#### C) "Forced token" tests (harder, but powerful)
+If constrained decoding or edit-distance objectives can be used:
 - force inclusion of token `t` and measure induced degradation
 - or compare completions when token `t` is replaced by nearest neighbor token.
 
@@ -429,10 +424,10 @@ This is non-negotiable for reviewer acceptance.
 Choose top-N tokens by `priority(t)` subject to:
 - `cons@k(t) ≥ cons_min` (e.g., 0.6–0.8)
 - `sev(t) ≥ sev_min` (top percentile)
-- optionally “high impact” tokens by frequency
+- optionally "high impact" tokens by frequency
 
 ### 12.2 Repair objective (recommended main method)
-We edit only `e_t` (or `x_t` with renorm), leaving the rest frozen.
+Edit only `e_t` (or `x_t` with renorm), leaving the rest frozen.
 
 Define:
 - `L_geom(t, x_t)` computed from displacement matrix `Δ` and covariance `C`.
@@ -467,7 +462,7 @@ This is a baseline, not the main method, unless it wins.
 
 ### 12.4 RL-based repair (optional / secondary)
 Only keep RL if:
-- you can define a *non-differentiable* reward (unit test pass/fail),
+- a *non-differentiable* reward can be defined (unit test pass/fail),
 - and RL beats gradient-free baselines or constrained optimization.
 
 If used:
@@ -475,7 +470,7 @@ If used:
 - Action: `Δx` bounded by norm
 - Reward: `-log(cond)` + α*(micro-test pass)
 - Budget: explicit rollouts and compute costs logged
-- Compare to: random search, CMA-ES/NES, and your constrained optimizer.
+- Compare to: random search, CMA-ES/NES, and constrained optimizer.
 
 ### 12.5 Safety constraint: semantic drift
 After repair, validate:
@@ -485,7 +480,7 @@ After repair, validate:
 
 ---
 
-## 13) Evaluation Plan (What we must report)
+## 13) Evaluation Plan (Required Reporting)
 
 ### 13.1 Diagnostic evaluation (RQ1)
 1. **Geometry census**
@@ -503,7 +498,7 @@ After repair, validate:
 ### 13.2 Causal evaluation (RQ2)
 1. Pick a set `T_bad` of top tokens by priority.
 2. Pick matched control set `T_ctrl` (same size) matched on type & frequency.
-3. Apply repair to `T_bad` and separately apply “placebo repair” to `T_ctrl` (same optimizer budget).
+3. Apply repair to `T_bad` and separately apply "placebo repair" to `T_ctrl` (same optimizer budget).
 4. Evaluate:
    - token stress tests (primary)
    - plus code/math benchmarks (secondary but important)
@@ -516,7 +511,7 @@ After repair, validate:
 - General regression suite (must-have):
   - perplexity on a text corpus OR
   - a general benchmark (e.g., MMLU-like) or a smaller proxy
-The paper must show “no big regression.”
+The paper must show "no big regression."
 
 ### 13.4 Compute and scalability
 Report:
@@ -530,7 +525,7 @@ Report:
 ## 14) Baselines (Minimum Set)
 
 ### 14.1 Diagnostic baselines
-- Frequency-only heuristics (rare tokens are “bad”)
+- Frequency-only heuristics (rare tokens are "bad")
 - Norm-only heuristics (if norms vary)
 - LOF / density-based outlier detection (Stage 1 competitor)
 
@@ -543,7 +538,7 @@ Report:
 
 ---
 
-## 15) Ablations (Must-have for acceptance)
+## 15) Ablations (Required for acceptance)
 
 1. Stage 1 only vs Stage 1+2 vs Stage 1+2(+3)
 2. Different neighborhood sizes k
@@ -572,55 +567,53 @@ Report:
 
 ---
 
-## 17) Implementation Blueprint (Repo Layout)
+## 17) Implementation Blueprint (Repository Layout)
 
 ```
-
 dctt/
-**init**.py
-config/
-default.yaml
-model_llama.yaml
-model_mistral.yaml
-data/
-corpora/                 # optional local corpora for frequency estimation
-stress_tests/
-embeddings/
-extract.py               # load model, pull embedding matrices, save to disk
-normalize.py
-neighbors/
-build_index.py           # FAISS/HNSW index build
-query.py                 # kNN queries
-metrics/
-stage1.py
-stage2.py
-stage3.py               # optional
-severity.py
-consistency.py
-thresholding.py
-repair/
-optimize.py              # constrained optimization
-projection.py            # orthogonal baseline
-rl.py                    # optional
-validate_semantics.py
-eval/
-stress_code.py
-stress_math.py
-humaneval.py
-gsm8k.py
-regressions.py
-experiments/
-run_census.py
-run_predictive_validity.py
-run_causal_repair.py
-run_ablation_suite.py
-scripts/
-make_plots.py
-summarize_results.py
-outputs/
-runs/                    # each run has config, logs, metrics, plots
-
-````
+├── __init__.py
+├── config/
+│   ├── default.yaml
+│   ├── model_llama.yaml
+│   └── model_mistral.yaml
+├── data/
+│   ├── corpora/                 # optional local corpora for frequency estimation
+│   └── stress_tests/
+├── embeddings/
+│   ├── extract.py               # load model, pull embedding matrices, save to disk
+│   └── normalize.py
+├── neighbors/
+│   ├── build_index.py           # FAISS/HNSW index build
+│   └── query.py                 # kNN queries
+├── metrics/
+│   ├── stage1.py
+│   ├── stage2.py
+│   ├── stage3.py               # optional
+│   ├── severity.py
+│   ├── consistency.py
+│   └── thresholding.py
+├── repair/
+│   ├── optimize.py              # constrained optimization
+│   ├── projection.py            # orthogonal baseline
+│   ├── rl.py                    # optional
+│   └── validate_semantics.py
+├── eval/
+│   ├── stress_code.py
+│   ├── stress_math.py
+│   ├── humaneval.py
+│   ├── gsm8k.py
+│   └── regressions.py
+├── experiments/
+│   ├── run_census.py
+│   ├── run_predictive_validity.py
+│   ├── run_causal_repair.py
+│   └── run_ablation_suite.py
+├── scripts/
+│   ├── make_plots.py
+│   └── summarize_results.py
+└── outputs/
+    └── runs/                    # each run has config, logs, metrics, plots
+```
 
 **Config management:** Hydra/YAML recommended; every run stores:
 - git commit hash
@@ -662,7 +655,7 @@ runs/                    # each run has config, logs, metrics, plots
 ### Risk C: Neighbor selection instability
 **Mitigation:** `cons@k`, index reproducibility logging, sensitivity analyses.
 
-### Risk D: Stage 3 “math garnish”
+### Risk D: Stage 3 "math garnish"
 **Mitigation:** Stage 3 is optional; it must justify itself via ablation.
 
 ### Risk E: Improvements are small/noisy
@@ -670,7 +663,7 @@ runs/                    # each run has config, logs, metrics, plots
 
 ---
 
-## 20) Concrete “Next Actions” Checklist (Start Here)
+## 20) Implementation Checklist
 
 ### Setup
 - [ ] Choose target model(s) with accessible embeddings.
@@ -704,7 +697,7 @@ runs/                    # each run has config, logs, metrics, plots
 - [ ] Run regression suite.
 
 ### Write-up assets
-- [ ] Generate required plots/tables for the “paper story”.
+- [ ] Generate required plots/tables for the "paper story".
 - [ ] Prepare ablation suite.
 
 ---
@@ -720,7 +713,7 @@ runs/                    # each run has config, logs, metrics, plots
 
 ---
 
-## 22) “Definition of Done” (What counts as success)
+## 22) Success Criteria
 
 Minimum publishable result:
 - Diagnostic metrics + thresholds that identify a non-trivial subset of tokens.
@@ -753,7 +746,7 @@ m = max(dim95, m_min)
 cond = (eigvals[0] + eps) / (eigvals[m-1] + eps)
 
 logdet = sum([log(l + eps) for l in eigvals])  # or top-m only
-````
+```
 
 ### A2) Repair loop (outer neighbors, inner optimization)
 
@@ -790,26 +783,16 @@ X_repaired[t] = x
 
 ---
 
-## Appendix C — Claim Discipline (What we will and won’t claim)
+## Appendix C — Claim Discipline (What will and won't be claimed)
 
-We WILL claim:
+**Will claim:**
 
 * a measurable token-level diagnostic signal
 * causal improvements from targeted repairs vs matched controls
 * compute-aware pipeline with ablations
 
-We will NOT claim (unless proven):
+**Will NOT claim (unless proven):**
 
-* universal “manifold correctness”
+* universal "manifold correctness"
 * that topology metrics are necessary
 * that this fully explains reasoning errors
-
----
-
-```
-
-If you want, I can also generate:
-- a matching `default.yaml` config template (Hydra-style),
-- a “paper skeleton” Markdown (NeurIPS-format outline + required figures/tables),
-- and a one-page experiment matrix (each experiment → hypothesis → variables → outputs → acceptance criteria).
-```
