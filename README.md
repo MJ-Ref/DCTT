@@ -198,9 +198,9 @@ This is a research codebase under active development. Current status:
 - [x] Stress test framework
 - [x] Statistical evaluation
 - [x] W&B integration
-- [ ] Benchmark wrappers (HumanEval, GSM8k)
-- [ ] Stage 3 TDA metrics
-- [ ] Paper figures generation
+- [x] Benchmark wrappers (HumanEval, GSM8k)
+- [x] Stage 3 TDA metrics
+- [x] Paper figures generation
 
 ## Citation
 
