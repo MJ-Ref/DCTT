@@ -187,6 +187,35 @@ make typecheck
 make pre-commit
 ```
 
+## Experimental Results
+
+### Qwen2.5-Coder-7B Analysis
+
+Full vocabulary census on 152,064 tokens (3,584 dimensions):
+
+| Metric | Result |
+|--------|--------|
+| Tokens analyzed | 152,064 |
+| Flagged tokens (poor geometry) | 3,325 (2.19%) |
+| Processing speed | ~330 tokens/sec |
+| Total census time | 7.5 minutes |
+
+**High-severity token types:**
+- Nested punctuation: `))):\n`, `))))\n\n`
+- Mixed quotes/escapes: ` ...\'`, `"For`, `("`, `…"`
+- Special characters: `、` (Chinese), `０` (full-width)
+- Line ending variants: `),\r\n`, `',\r\r\n`
+
+### Repair Validation Results
+
+| Criterion | Status | Value |
+|-----------|--------|-------|
+| Embeddings moved | ✓ YES | similarity = 0.98 |
+| Semantic preservation | ✓ PASS | Jaccard 0.75 - 1.0 |
+| Geometry improved | ✗ NO | cond/PR unchanged |
+
+**Key Finding:** Local gradient descent preserves semantics but doesn't improve geometry when neighborhoods are uniformly pathological. Global repair strategies needed.
+
 ## Project Status
 
 This is a research codebase under active development. Current status:
@@ -201,6 +230,8 @@ This is a research codebase under active development. Current status:
 - [x] Benchmark wrappers (HumanEval, GSM8k)
 - [x] Stage 3 TDA metrics
 - [x] Paper figures generation
+- [x] Full census on Qwen2.5-Coder-7B
+- [x] Repair validation experiments
 
 ## Citation
 
