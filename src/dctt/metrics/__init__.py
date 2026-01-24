@@ -22,6 +22,13 @@ from dctt.metrics.thresholding import (
     compute_adaptive_thresholds,
     AdaptiveThresholder,
 )
+from dctt.metrics.stage3 import (
+    Stage3Result,
+    MLEDimensionEstimator,
+    TDAAnalyzer,
+    compute_stage3_metrics,
+    should_run_stage3,
+)
 
 __all__ = [
     # Stage 1
@@ -47,4 +54,10 @@ __all__ = [
     # Thresholding
     "compute_adaptive_thresholds",
     "AdaptiveThresholder",
+    # Stage 3
+    "Stage3Result",
+    "MLEDimensionEstimator",
+    "TDAAnalyzer",
+    "compute_stage3_metrics",
+    "should_run_stage3",
 ]

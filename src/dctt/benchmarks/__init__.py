@@ -1,14 +1,31 @@
 """External benchmark wrappers for evaluation."""
 
-from dctt.benchmarks.humaneval import HumanEvalBenchmark, run_humaneval
-from dctt.benchmarks.gsm8k import GSM8kBenchmark, run_gsm8k
-from dctt.benchmarks.regression import RegressionSuite, run_regression_suite
+from dctt.benchmarks.humaneval import (
+    HumanEvalConfig,
+    HumanEvalResult,
+    HumanEvalRunner,
+    compare_humaneval_results,
+    run_humaneval,
+)
+from dctt.benchmarks.gsm8k import (
+    GSM8KConfig,
+    GSM8KResult,
+    GSM8KRunner,
+    compare_gsm8k_results,
+    run_gsm8k,
+)
 
 __all__ = [
-    "HumanEvalBenchmark",
+    # HumanEval
+    "HumanEvalConfig",
+    "HumanEvalResult",
+    "HumanEvalRunner",
+    "compare_humaneval_results",
     "run_humaneval",
-    "GSM8kBenchmark",
+    # GSM8K
+    "GSM8KConfig",
+    "GSM8KResult",
+    "GSM8KRunner",
+    "compare_gsm8k_results",
     "run_gsm8k",
-    "RegressionSuite",
-    "run_regression_suite",
 ]
