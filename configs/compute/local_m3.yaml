@@ -1,36 +1,35 @@
 # M3 Max 96GB Optimized Compute Configuration
-compute:
-  device: "mps"  # Metal Performance Shaders for Apple Silicon
-  fallback_device: "cpu"
+device: "mps"  # Metal Performance Shaders for Apple Silicon
+fallback_device: "cpu"
 
-  # Memory management for 96GB unified memory
-  memory:
-    max_batch_size: 10000  # Tokens per batch for metric computation
-    embedding_cache_gb: 40  # Reserve for embedding cache
-    index_cache_gb: 20  # Reserve for kNN index
-    working_memory_gb: 30  # For metric computation workspace
+# Memory management for 96GB unified memory
+memory:
+  max_batch_size: 10000  # Tokens per batch for metric computation
+  embedding_cache_gb: 40  # Reserve for embedding cache
+  index_cache_gb: 20  # Reserve for kNN index
+  working_memory_gb: 30  # For metric computation workspace
 
-  # Parallelism
-  parallel:
-    num_workers: 12  # M3 Max has 14 CPU cores, leave 2 for system
-    use_multiprocessing: true
-    chunk_size: 1000  # Tokens per chunk for parallel processing
+# Parallelism
+parallel:
+  num_workers: 12  # M3 Max has 14 CPU cores, leave 2 for system
+  use_multiprocessing: true
+  chunk_size: 1000  # Tokens per chunk for parallel processing
 
-  # kNN Index settings optimized for M3
-  index:
-    type: "usearch"
-    metric: "cos"  # Cosine distance
-    dtype: "f32"  # Float32 for balance of precision and speed
+# kNN Index settings optimized for M3
+index:
+  type: "usearch"
+  metric: "cos"  # Cosine distance
+  dtype: "f32"  # Float32 for balance of precision and speed
 
-    # HNSW parameters
-    connectivity: 32  # M parameter
-    expansion_add: 128  # efConstruction
-    expansion_search: 64  # ef for search
+  # HNSW parameters (reduced for faster build on high-dim embeddings)
+  connectivity: 16  # M parameter (was 32)
+  expansion_add: 64  # efConstruction (was 128)
+  expansion_search: 32  # ef for search (was 64)
 
-    # Multi-threading
-    threads: 12
+  # Multi-threading
+  threads: 12
 
-  # Numerical precision
-  precision:
-    metric_dtype: "float64"  # High precision for spectral metrics
-    index_dtype: "float32"  # Standard for kNN
+# Numerical precision
+precision:
+  metric_dtype: "float64"  # High precision for spectral metrics
+  index_dtype: "float32"  # Standard for kNN

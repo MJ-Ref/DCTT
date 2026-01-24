@@ -243,8 +243,12 @@ class TestCovarianceProperties:
     )
     @settings(max_examples=50)
     def test_covariance_shape(self, k: int, d: int) -> None:
-        """Covariance has shape (d, d)."""
+        """Covariance has shape (k, k) by default for efficiency."""
         rng = np.random.default_rng(42)
         displacement = rng.standard_normal((k, d))
-        cov = compute_local_covariance(displacement)
-        assert cov.shape == (d, d)
+        # Default: k×k (same non-zero eigenvalues as d×d, but O(k³) vs O(d³))
+        cov = compute_local_covariance(displacement, use_small_matrix=True)
+        assert cov.shape == (k, k)
+        # Can also get d×d if needed
+        cov_full = compute_local_covariance(displacement, use_small_matrix=False)
+        assert cov_full.shape == (d, d)

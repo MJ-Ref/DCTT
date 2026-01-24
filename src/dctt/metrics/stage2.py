@@ -58,15 +58,18 @@ def compute_displacement_matrix(
 def compute_local_covariance(
     displacement_matrix: FloatArray,
     center: bool = True,
+    use_small_matrix: bool = True,
 ) -> FloatArray:
     """Compute local covariance matrix from displacement matrix.
 
     Args:
         displacement_matrix: Displacement matrix Δ of shape (k, d).
         center: Whether to center the displacements (recommended).
+        use_small_matrix: If True, compute k×k matrix (faster when k << d).
+            Both k×k and d×d versions have the same non-zero eigenvalues.
 
     Returns:
-        Covariance matrix of shape (d, d).
+        Covariance matrix of shape (k, k) if use_small_matrix else (d, d).
     """
     k = displacement_matrix.shape[0]
 
@@ -75,8 +78,13 @@ def compute_local_covariance(
     else:
         delta_centered = displacement_matrix
 
-    # Compute covariance: C = (Δc^T @ Δc) / (k - 1)
-    covariance = (delta_centered.T @ delta_centered) / (k - 1)
+    if use_small_matrix:
+        # Compute k×k Gram matrix: G = (Δc @ Δc^T) / (k - 1)
+        # Has same non-zero eigenvalues as d×d covariance, but O(k³) vs O(d³)
+        covariance = (delta_centered @ delta_centered.T) / (k - 1)
+    else:
+        # Compute d×d covariance: C = (Δc^T @ Δc) / (k - 1)
+        covariance = (delta_centered.T @ delta_centered) / (k - 1)
 
     return covariance
 

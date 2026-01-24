@@ -45,7 +45,9 @@ def main(cfg: DictConfig) -> None:
         from dctt.embeddings.normalize import normalize_embeddings
         from dctt.embeddings.cache import EmbeddingCache
 
-        cache = EmbeddingCache(cfg.output_dir + "/embeddings")
+        # Use fixed cache directory (not Hydra's runtime dir)
+        cache_dir = Path(__file__).parent.parent / "outputs" / "embeddings"
+        cache = EmbeddingCache(str(cache_dir))
         cache_key = cache.make_key(cfg.model.name, cfg.model.revision)
 
         if cache.has(cache_key):
@@ -68,16 +70,28 @@ def main(cfg: DictConfig) -> None:
         vocab_size, embedding_dim = embeddings.shape
         logger.info(f"Embeddings shape: {vocab_size} x {embedding_dim}")
 
-        # Build kNN index
+        # Build kNN index (with caching)
         logger.info("Building kNN index")
         from dctt.neighbors.usearch_index import USearchIndex
+
+        index_cache_dir = Path(__file__).parent.parent / "outputs" / "indices"
+        index_cache_dir.mkdir(parents=True, exist_ok=True)
+        index_path = index_cache_dir / f"{cache_key}_{cfg.neighbors.metric}.usearch"
 
         index = USearchIndex(
             connectivity=cfg.compute.index.connectivity,
             expansion_add=cfg.compute.index.expansion_add,
             expansion_search=cfg.compute.index.expansion_search,
         )
-        index.build(embeddings, metric=cfg.neighbors.metric, seed=cfg.seed)
+
+        if index_path.exists():
+            logger.info(f"Loading index from cache: {index_path}")
+            index.load(index_path)
+        else:
+            logger.info("Building new index (this may take several minutes)...")
+            index.build(embeddings, metric=cfg.neighbors.metric, seed=cfg.seed)
+            logger.info(f"Saving index to cache: {index_path}")
+            index.save(index_path)
 
         # Determine which tokens to analyze
         experiment_cfg = cfg.experiment

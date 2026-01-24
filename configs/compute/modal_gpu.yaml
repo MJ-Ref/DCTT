@@ -1,38 +1,37 @@
 # Modal Cloud GPU Configuration
-compute:
-  device: "cuda"
-  fallback_device: "cpu"
+device: "cuda"
+fallback_device: "cpu"
 
-  # Memory management for A100 80GB
-  memory:
-    max_batch_size: 50000
-    embedding_cache_gb: 60
-    index_cache_gb: 15
-    working_memory_gb: 5
+# Memory management for A100 80GB
+memory:
+  max_batch_size: 50000
+  embedding_cache_gb: 60
+  index_cache_gb: 15
+  working_memory_gb: 5
 
-  # Parallelism
-  parallel:
-    num_workers: 8
-    use_multiprocessing: false  # Use GPU parallelism instead
-    chunk_size: 5000
+# Parallelism
+parallel:
+  num_workers: 8
+  use_multiprocessing: false  # Use GPU parallelism instead
+  chunk_size: 5000
 
-  # kNN Index settings for GPU
-  index:
-    type: "faiss_gpu"
-    metric: "cos"
-    dtype: "f32"
+# kNN Index settings for GPU
+index:
+  type: "faiss_gpu"
+  metric: "cos"
+  dtype: "f32"
 
-    # FAISS GPU parameters
-    nlist: 1024  # Number of clusters for IVF
-    nprobe: 64  # Number of clusters to search
+  # FAISS GPU parameters
+  nlist: 1024  # Number of clusters for IVF
+  nprobe: 64  # Number of clusters to search
 
-    # For flat index (smaller vocabs)
-    use_flat: true  # For < 200k vocab
+  # For flat index (smaller vocabs)
+  use_flat: true  # For < 200k vocab
 
-  # Numerical precision
-  precision:
-    metric_dtype: "float64"
-    index_dtype: "float32"
+# Numerical precision
+precision:
+  metric_dtype: "float64"
+  index_dtype: "float32"
 
 # Modal-specific settings
 modal:

@@ -49,11 +49,15 @@ class TestLocalCovariance:
     """Tests for local covariance computation."""
 
     def test_shape(self) -> None:
-        """Covariance matrix has correct shape."""
+        """Covariance matrix has correct shape (k×k for efficiency)."""
         k, d = 50, 32
         displacement = np.random.randn(k, d)
-        covariance = compute_local_covariance(displacement)
-        assert covariance.shape == (d, d)
+        # By default, uses k×k matrix (has same non-zero eigenvalues as d×d)
+        covariance = compute_local_covariance(displacement, use_small_matrix=True)
+        assert covariance.shape == (k, k)
+        # Can also compute d×d if needed
+        covariance_full = compute_local_covariance(displacement, use_small_matrix=False)
+        assert covariance_full.shape == (d, d)
 
     def test_symmetric(self) -> None:
         """Covariance matrix is symmetric."""
@@ -259,7 +263,8 @@ class TestComputeStage2Metrics:
             sample_embeddings_small, 0, neighbors, return_eigenvalues=True
         )
         assert result_with_eig.eigenvalues is not None
-        assert len(result_with_eig.eigenvalues) == sample_embeddings_small.shape[1]
+        # Eigenvalues from k×k covariance matrix (same non-zero eigenvalues as d×d)
+        assert len(result_with_eig.eigenvalues) == k
 
     def test_degenerate_neighborhood_detected(
         self, degenerate_embeddings: np.ndarray

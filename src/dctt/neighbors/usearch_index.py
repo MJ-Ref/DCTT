@@ -188,6 +188,11 @@ class USearchIndex(VectorIndex):
             indices = results.keys.astype(np.int64)
             distances = results.distances.astype(np.float64)
 
+            # Ensure 2D arrays (usearch returns 1D for single query)
+            if indices.ndim == 1:
+                indices = indices.reshape(1, -1)
+                distances = distances.reshape(1, -1)
+
             if exclude_self:
                 # Filter out self-matches (distance very close to 0)
                 n_queries = query_vectors.shape[0]

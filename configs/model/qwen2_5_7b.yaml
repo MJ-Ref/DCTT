@@ -1,23 +1,22 @@
 # Qwen2.5-7B Model Configuration
-model:
-  name: "Qwen/Qwen2.5-7B"
-  revision: "main"
-  family: "qwen2.5"
+name: "Qwen/Qwen2.5-7B"
+revision: "main"
+family: "qwen2.5"
 
-  # Embedding extraction
-  embedding_source: "model.embed_tokens.weight"
-  embedding_dim: 3584
-  vocab_size: 151936
+# Embedding extraction
+embedding_source: "model.embed_tokens.weight"
+embedding_dim: 3584
+vocab_size: 151936
 
-  # Model loading
-  torch_dtype: "bfloat16"
+# Model loading
+torch_dtype: "bfloat16"
+trust_remote_code: true
+low_cpu_mem_usage: true
+
+# Use MLX on Apple Silicon when available
+use_mlx: false  # Set to true if mlx-lm is installed
+
+# Tokenizer
+tokenizer:
   trust_remote_code: true
-  low_cpu_mem_usage: true
-
-  # Use MLX on Apple Silicon when available
-  use_mlx: false  # Set to true if mlx-lm is installed
-
-  # Tokenizer
-  tokenizer:
-    trust_remote_code: true
-    use_fast: true
+  use_fast: true

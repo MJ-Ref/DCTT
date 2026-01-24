@@ -1,70 +1,69 @@
 # Full DCTT Pipeline Configuration
-pipeline:
-  name: "full"
+name: "full"
 
-  # Enable all stages
-  stages:
-    stage0_preprocessing: true
-    stage1_basic_outliers: true
-    stage2_spectral_geometry: true
-    stage3_advanced: false  # Only enable after ablation justifies it
+# Enable all stages
+stages:
+  stage0_preprocessing: true
+  stage1_basic_outliers: true
+  stage2_spectral_geometry: true
+  stage3_advanced: false  # Only enable after ablation justifies it
 
-  # Stage 1: Basic Local Outlier Checks
-  stage1:
-    metrics:
-      - mu_k  # Mean kNN distance
-      - med_k  # Median kNN distance
-      - spread_q  # Quantile spread ratio (q90/q10)
-    lof_enabled: false  # LOF is expensive, keep optional
-    quantile_low: 0.10
-    quantile_high: 0.90
+# Stage 1: Basic Local Outlier Checks
+stage1:
+  metrics:
+    - mu_k  # Mean kNN distance
+    - med_k  # Median kNN distance
+    - spread_q  # Quantile spread ratio (q90/q10)
+  lof_enabled: false  # LOF is expensive, keep optional
+  quantile_low: 0.10
+  quantile_high: 0.90
 
-  # Stage 2: Core Spectral Geometry (Main Contribution)
-  stage2:
-    metrics:
-      - dim95  # 95% explained variance dimension
-      - pr  # Participation ratio
-      - cond  # Local condition number
-      - logdet  # Log-determinant of covariance
-      - anisotropy  # λ1 / mean(λi)
+# Stage 2: Core Spectral Geometry (Main Contribution)
+stage2:
+  metrics:
+    - dim95  # 95% explained variance dimension
+    - pr  # Participation ratio
+    - cond  # Local condition number
+    - logdet  # Log-determinant of covariance
+    - anisotropy  # λ1 / mean(λi)
 
-    # Displacement matrix construction
-    use_displacement: true  # Option B from spec
-    center_displacements: true
+  # Displacement matrix construction
+  use_displacement: true  # Option B from spec
+  center_displacements: true
 
-    # Effective dimension settings
-    variance_threshold: 0.95
-    m_min: 10  # Minimum dimension for condition number denominator
+  # Effective dimension settings
+  variance_threshold: 0.95
+  m_min: 10  # Minimum dimension for condition number denominator
 
-  # Stage 3: Advanced (Optional)
-  stage3:
-    metrics:
-      - mle_intrinsic_dim  # MLE intrinsic dimension estimator
-      - tda_h1_lifetime  # Persistent homology H1 max lifetime
-    tda:
-      max_dim: 1  # Only compute H0 and H1
-      max_points: 100  # Subsample for TDA
-      projection_dim: 30  # Project to lower dim before TDA
+# Stage 3: Advanced (Optional)
+stage3:
+  metrics:
+    - mle_intrinsic_dim  # MLE intrinsic dimension estimator
+    - tda_h1_lifetime  # Persistent homology H1 max lifetime
+  tda:
+    max_dim: 1  # Only compute H0 and H1
+    max_points: 100  # Subsample for TDA
+    projection_dim: 30  # Project to lower dim before TDA
 
-  # Consistency estimation
-  consistency:
-    num_runs: 5  # Number of index builds / projections
-    methods:
-      - index_seeds  # Different random seeds for index
-      - k_variants  # Different k values
-    k_variants: [25, 50, 75, 100]
+# Consistency estimation
+consistency:
+  num_runs: 5  # Number of index builds / projections
+  methods:
+    - index_seeds  # Different random seeds for index
+    - k_variants  # Different k values
+  k_variants: [25, 50, 75, 100]
 
-  # Severity scoring
-  severity:
-    method: "robust_zscore"
-    weights:
-      cond: 1.0
-      pr: 1.0  # Negated in computation (low PR is bad)
-      logdet: 1.0  # Negated in computation
-      spread_q: 0.5
+# Severity scoring
+severity:
+  method: "robust_zscore"
+  weights:
+    cond: 1.0
+    pr: 1.0  # Negated in computation (low PR is bad)
+    logdet: 1.0  # Negated in computation
+    spread_q: 0.5
 
-  # Thresholding
-  thresholding:
-    method: "per_bucket_quantile"
-    quantile_high: 0.99  # For "large is bad" metrics
-    quantile_low: 0.01  # For "small is bad" metrics
+# Thresholding
+thresholding:
+  method: "per_bucket_quantile"
+  quantile_high: 0.99  # For "large is bad" metrics
+  quantile_low: 0.01  # For "small is bad" metrics

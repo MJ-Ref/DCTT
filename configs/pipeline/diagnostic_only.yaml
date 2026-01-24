@@ -1,38 +1,47 @@
 # Diagnostic-Only Pipeline (No Repair)
-pipeline:
-  name: "diagnostic_only"
+name: "diagnostic_only"
 
-  stages:
-    stage0_preprocessing: true
-    stage1_basic_outliers: true
-    stage2_spectral_geometry: true
-    stage3_advanced: false
+stages:
+  stage0_preprocessing: true
+  stage1_basic_outliers: true
+  stage2_spectral_geometry: true
+  stage3_advanced: false
 
-  # Inherit defaults from full pipeline
-  stage1:
-    metrics: [mu_k, med_k, spread_q]
-    lof_enabled: false
+# Inherit defaults from full pipeline
+stage1:
+  metrics: [mu_k, med_k, spread_q]
+  lof_enabled: false
+  quantile_low: 0.10
+  quantile_high: 0.90
 
-  stage2:
-    metrics: [dim95, pr, cond, logdet, anisotropy]
-    use_displacement: true
-    center_displacements: true
-    variance_threshold: 0.95
-    m_min: 10
+stage2:
+  metrics: [dim95, pr, cond, logdet, anisotropy]
+  use_displacement: true
+  center_displacements: true
+  variance_threshold: 0.95
+  m_min: 10
 
-  consistency:
-    num_runs: 3  # Fewer runs for faster diagnostics
-    methods: [index_seeds]
+stage3:
+  metrics: []
+  tda:
+    max_dim: 1
+    max_points: 100
+    projection_dim: 30
 
-  severity:
-    method: "robust_zscore"
-    weights:
-      cond: 1.0
-      pr: 1.0
-      logdet: 1.0
-      spread_q: 0.5
+consistency:
+  num_runs: 3  # Fewer runs for faster diagnostics
+  methods: [index_seeds]
+  k_variants: [25, 50, 75, 100]
 
-  thresholding:
-    method: "per_bucket_quantile"
-    quantile_high: 0.99
-    quantile_low: 0.01
+severity:
+  method: "robust_zscore"
+  weights:
+    cond: 1.0
+    pr: 1.0
+    logdet: 1.0
+    spread_q: 0.5
+
+thresholding:
+  method: "per_bucket_quantile"
+  quantile_high: 0.99
+  quantile_low: 0.01

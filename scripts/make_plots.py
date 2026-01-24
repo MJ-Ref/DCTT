@@ -65,8 +65,17 @@ def plot_metric_distributions(
     buckets: dict[str, dict[str, list[float]]] = {}
     metrics = ["cond", "pr", "logdet", "dim95"]
 
-    for token_result in results.get("tokens", []):
-        bucket = token_result.get("bucket", "unknown")
+    # Handle both list format and dict format with "tokens" key
+    token_list = results if isinstance(results, list) else results.get("tokens", [])
+
+    for token_result in token_list:
+        # Get bucket - handle both tuple/list and string formats
+        bucket_raw = token_result.get("bucket", ["UNKNOWN", "UNKNOWN"])
+        if isinstance(bucket_raw, (list, tuple)):
+            bucket = f"{bucket_raw[0]}_{bucket_raw[1]}"
+        else:
+            bucket = str(bucket_raw)
+
         if bucket not in buckets:
             buckets[bucket] = {m: [] for m in metrics}
 

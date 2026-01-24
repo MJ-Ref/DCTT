@@ -1,30 +1,29 @@
 # Diagnostic Census Experiment
-experiment:
-  name: "census"
-  description: "Full diagnostic census of embedding geometry across vocabulary"
+name: "census"
+description: "Full diagnostic census of embedding geometry across vocabulary"
 
-  # What to compute
-  compute_stage1: true
-  compute_stage2: true
-  compute_stage3: false
-  compute_consistency: true
-  compute_severity: true
+# What to compute
+compute_stage1: true
+compute_stage2: true
+compute_stage3: false
+compute_consistency: true
+compute_severity: true
 
-  # Token selection
-  tokens:
-    mode: "all"  # "all", "sample", "subset"
-    sample_size: null  # If mode is "sample"
-    subset_ids: null  # If mode is "subset"
+# Token selection
+tokens:
+  mode: "all"  # "all", "sample", "subset"
+  sample_size: null  # If mode is "sample"
+  subset_ids: null  # If mode is "subset"
 
-  # Output settings
-  outputs:
-    save_all_metrics: true
-    save_flagged_only: false
-    save_eigenvalues: true  # Full spectrum for analysis
-    save_neighbors: false  # Can be large
+# Output settings
+outputs:
+  save_all_metrics: true
+  save_flagged_only: false
+  save_eigenvalues: true  # Full spectrum for analysis
+  save_neighbors: false  # Can be large
 
-  # Analysis settings
-  analysis:
-    compute_bucket_stats: true
-    compute_correlations: true
-    generate_plots: true
+# Analysis settings
+analysis:
+  compute_bucket_stats: true
+  compute_correlations: true
+  generate_plots: true
