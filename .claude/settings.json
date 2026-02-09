@@ -1,0 +1,35 @@
+{
+  "hooks": {
+    "postEdit": [
+      {
+        "pattern": "**/*.py",
+        "command": "cd /Users/mj/Documents/DCTT && ruff check --fix $FILE 2>/dev/null || true"
+      }
+    ],
+    "postWrite": [
+      {
+        "pattern": "src/**/*.py",
+        "command": "cd /Users/mj/Documents/DCTT && pytest tests/ -x -q --tb=short 2>/dev/null | head -20 || true"
+      },
+      {
+        "pattern": "experiments/**/*.py",
+        "command": "cd /Users/mj/Documents/DCTT && python -m py_compile $FILE && echo '✓ Syntax OK: $FILE'"
+      }
+    ]
+  },
+  "permissions": {
+    "allow": [
+      "Bash(cd /Users/mj/Documents/DCTT && ruff*)",
+      "Bash(cd /Users/mj/Documents/DCTT && pytest*)",
+      "Bash(cd /Users/mj/Documents/DCTT && python -m py_compile*)",
+      "Bash(git *)",
+      "Bash(ls *)",
+      "Bash(cat *)",
+      "Read",
+      "Edit",
+      "Write",
+      "Glob",
+      "Grep"
+    ]
+  }
+}
