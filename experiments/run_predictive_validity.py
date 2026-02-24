@@ -155,6 +155,157 @@ def simulate_stress_test_failures(
     return failures
 
 
+def _norms_cache_path(cache_dir: Path, cache_key: str) -> Path:
+    """Return norms cache path aligned to embedding cache key."""
+    return cache_dir / f"{cache_key}.norms.npy"
+
+
+def _load_cached_norms(
+    cache_dir: Path,
+    cache_key: str,
+    expected_vocab_size: int,
+) -> np.ndarray | None:
+    """Load cached raw embedding norms if available and shape-compatible."""
+    path = _norms_cache_path(cache_dir, cache_key)
+    if not path.exists():
+        return None
+    try:
+        norms = np.load(path)
+    except Exception as exc:
+        logger.warning("Failed to load norms cache %s: %s", path, exc)
+        return None
+    if norms.ndim != 1 or int(norms.shape[0]) != int(expected_vocab_size):
+        logger.warning(
+            "Ignoring norms cache with unexpected shape %s (expected %d,)",
+            norms.shape,
+            expected_vocab_size,
+        )
+        return None
+    return norms.astype(np.float64)
+
+
+def _save_cached_norms(
+    cache_dir: Path,
+    cache_key: str,
+    norms: np.ndarray,
+) -> None:
+    """Persist raw embedding norms for later confound-aware analysis."""
+    cache_dir.mkdir(parents=True, exist_ok=True)
+    path = _norms_cache_path(cache_dir, cache_key)
+    np.save(path, norms.astype(np.float64))
+
+
+def _resolve_path(repo_root: Path, candidate: str) -> Path:
+    """Resolve potentially-relative path against repository root."""
+    path = Path(candidate).expanduser()
+    if path.is_absolute():
+        return path
+    return (repo_root / path).resolve()
+
+
+def _load_frequency_counts(
+    *,
+    path: Path,
+    vocab_size: int,
+) -> np.ndarray | None:
+    """Load token frequency counts vector from supported formats.
+
+    Supported:
+    - `.npy`: dense vector with length near vocab_size (auto pad/truncate)
+    - `.json`: dict/list payload. Accepted forms:
+      - {"counts": [..]}
+      - {"counts": {"<token_id>": count, ...}}
+      - [..]
+    """
+    if not path.exists():
+        logger.warning("Frequency counts path does not exist: %s", path)
+        return None
+
+    try:
+        def _align_dense(values: np.ndarray) -> np.ndarray | None:
+            if values.ndim != 1:
+                logger.warning(
+                    "Invalid frequency vector shape %s at %s (expected 1D)",
+                    values.shape,
+                    path,
+                )
+                return None
+
+            clipped = np.clip(values.astype(np.float64), 0.0, None)
+            n_current = int(clipped.shape[0])
+            n_target = int(vocab_size)
+            if n_current == n_target:
+                return clipped
+            if n_current < n_target:
+                logger.warning(
+                    "Frequency vector length %d < vocab size %d at %s; padding trailing zeros.",
+                    n_current,
+                    n_target,
+                    path,
+                )
+                padded = np.zeros(n_target, dtype=np.float64)
+                padded[:n_current] = clipped
+                return padded
+
+            logger.warning(
+                "Frequency vector length %d > vocab size %d at %s; truncating extras.",
+                n_current,
+                n_target,
+                path,
+            )
+            return clipped[:n_target]
+
+        if path.suffix.lower() == ".npy":
+            values = np.load(path)
+            return _align_dense(values)
+
+        if path.suffix.lower() == ".json":
+            with path.open() as f:
+                payload = json.load(f)
+
+            raw_counts = payload.get("counts", payload) if isinstance(payload, dict) else payload
+            counts = np.zeros(int(vocab_size), dtype=np.float64)
+
+            if isinstance(raw_counts, list):
+                aligned = _align_dense(np.asarray(raw_counts, dtype=np.float64))
+                if aligned is None:
+                    return None
+                counts = aligned
+            elif isinstance(raw_counts, dict):
+                for key, value in raw_counts.items():
+                    try:
+                        token_id = int(key)
+                        if 0 <= token_id < int(vocab_size):
+                            counts[token_id] = max(float(value), 0.0)
+                    except Exception:
+                        continue
+            else:
+                logger.warning("Unsupported frequency JSON payload at %s", path)
+                return None
+
+            return np.clip(counts.astype(np.float64), 0.0, None)
+    except Exception as exc:
+        logger.warning("Failed to load frequency counts from %s: %s", path, exc)
+        return None
+
+    logger.warning("Unsupported frequency counts extension for %s", path)
+    return None
+
+
+def _frequency_tier_from_values(
+    value: float,
+    q20: float,
+    q80: float,
+) -> FrequencyTier:
+    """Map scalar frequency signal to HIGH/MID/LOW tier via log quantiles."""
+    log_val = np.log(max(float(value), 0.0) + 1.0)
+    if log_val >= q80:
+        return FrequencyTier.HIGH
+    if log_val <= q20:
+        return FrequencyTier.LOW
+    return FrequencyTier.MID
+
+
 class _StressModelAdapter:
     """Adapter exposing generation and candidate-scoring helpers for stress tests."""
 
@@ -458,18 +609,43 @@ def main(cfg: DictConfig) -> None:
         run = init_wandb_from_hydra(cfg, tags=["predictive_validity"])
 
     try:
+        repo_root = Path(__file__).parent.parent
+
         # Load cached embeddings
         from dctt.embeddings import extract_embeddings
         from dctt.embeddings.normalize import normalize_embeddings
         from dctt.embeddings.cache import EmbeddingCache
 
-        cache_dir = Path(__file__).parent.parent / "outputs" / "embeddings"
+        cache_dir = repo_root / "outputs" / "embeddings"
         cache = EmbeddingCache(str(cache_dir))
         cache_key = cache.make_key(cfg.model.name, cfg.model.revision)
+        raw_norms: np.ndarray | None = None
 
         if cache.has(cache_key):
             logger.info("Loading embeddings from cache")
-            embeddings, metadata = cache.load(cache_key)
+            cached_payload = cache.load(cache_key)
+            if cached_payload is None:
+                logger.warning("Embedding cache exists but failed to load; recomputing.")
+                embeddings_raw, tokenizer = extract_embeddings(
+                    model_name=cfg.model.name,
+                    revision=cfg.model.revision,
+                    device=cfg.compute.device,
+                    torch_dtype=cfg.model.torch_dtype,
+                )
+                embeddings, norms = normalize_embeddings(embeddings_raw, return_norms=True)
+                from dctt.embeddings import get_embedding_info
+
+                info = get_embedding_info(embeddings, cfg.model.name, cfg.model.revision)
+                cache.save(cache_key, embeddings, info)
+                raw_norms = norms.astype(np.float64)
+                _save_cached_norms(cache_dir, cache_key, raw_norms)
+            else:
+                embeddings, _metadata = cached_payload
+                raw_norms = _load_cached_norms(
+                    cache_dir,
+                    cache_key,
+                    expected_vocab_size=int(embeddings.shape[0]),
+                )
         else:
             logger.info("Extracting embeddings from model")
             embeddings_raw, tokenizer = extract_embeddings(
@@ -482,6 +658,8 @@ def main(cfg: DictConfig) -> None:
             from dctt.embeddings import get_embedding_info
             info = get_embedding_info(embeddings, cfg.model.name, cfg.model.revision)
             cache.save(cache_key, embeddings, info)
+            raw_norms = norms.astype(np.float64)
+            _save_cached_norms(cache_dir, cache_key, raw_norms)
 
         vocab_size, embedding_dim = embeddings.shape
         logger.info(f"Embeddings: {vocab_size} x {embedding_dim}")
@@ -494,7 +672,7 @@ def main(cfg: DictConfig) -> None:
         )
 
         # Build or load index
-        index_cache_dir = Path(__file__).parent.parent / "outputs" / "indices"
+        index_cache_dir = repo_root / "outputs" / "indices"
         index_cache_path = index_cache_dir / f"{cache_key}_{cfg.neighbors.metric}.usearch"
 
         index = USearchIndex(
@@ -512,7 +690,61 @@ def main(cfg: DictConfig) -> None:
             index_cache_dir.mkdir(parents=True, exist_ok=True)
             index.save(str(index_cache_path))
 
-        # Build token info with proper classification
+        predictive_cfg = cfg.get("predictive_validity", {})
+        fail_on_proxy_confounds = bool(
+            predictive_cfg.get("fail_on_proxy_confounds", False)
+        )
+
+        # Resolve norm confound source
+        norm_source = "cached_raw_norms"
+        if raw_norms is None or int(raw_norms.shape[0]) != int(vocab_size):
+            if fail_on_proxy_confounds:
+                raise RuntimeError(
+                    "Raw embedding norms unavailable for confound controls. "
+                    "Recompute embeddings and ensure norms cache is written."
+                )
+            raw_norms = np.ones(int(vocab_size), dtype=np.float64)
+            norm_source = "unit_proxy"
+            logger.warning(
+                "Using proxy norm confound (all ones); set "
+                "predictive_validity.fail_on_proxy_confounds=true to forbid this."
+            )
+
+        # Resolve frequency confound source
+        frequency_source = "token_id_proxy"
+        frequency_counts_path = predictive_cfg.get("token_frequency_counts_path", None)
+        frequency_values: np.ndarray | None = None
+        resolved_frequency_path: str | None = None
+        if frequency_counts_path:
+            candidate = _resolve_path(repo_root, str(frequency_counts_path))
+            loaded = _load_frequency_counts(path=candidate, vocab_size=int(vocab_size))
+            if loaded is not None:
+                frequency_values = loaded
+                frequency_source = "corpus_counts"
+                resolved_frequency_path = str(candidate)
+            else:
+                logger.warning(
+                    "Falling back to proxy frequency confound; failed to load %s",
+                    candidate,
+                )
+
+        if frequency_values is None:
+            if fail_on_proxy_confounds:
+                raise RuntimeError(
+                    "Token frequency counts unavailable for confound controls. "
+                    "Provide predictive_validity.token_frequency_counts_path."
+                )
+            frequency_values = 1.0 / (np.arange(int(vocab_size), dtype=np.float64) + 1.0)
+            logger.warning(
+                "Using proxy frequency confound from token rank; set "
+                "predictive_validity.fail_on_proxy_confounds=true to forbid this."
+            )
+
+        log_all_freq = np.log1p(np.clip(frequency_values, 0.0, None))
+        q20 = float(np.quantile(log_all_freq, 0.20))
+        q80 = float(np.quantile(log_all_freq, 0.80))
+
+        # Build token info with classification and confound features
         logger.info("Building token info...")
         token_infos = []
         for token_id in range(vocab_size):
@@ -522,23 +754,16 @@ def main(cfg: DictConfig) -> None:
                 token_str = f"<token_{token_id}>"
 
             token_type = classify_token_type(token_str)
-
-            # Assign frequency tier based on token_id (approximation)
-            # Lower IDs tend to be more frequent in BPE
-            if token_id < vocab_size * 0.2:
-                freq_tier = FrequencyTier.HIGH
-            elif token_id < vocab_size * 0.8:
-                freq_tier = FrequencyTier.MID
-            else:
-                freq_tier = FrequencyTier.LOW
+            token_frequency = float(frequency_values[token_id])
+            freq_tier = _frequency_tier_from_values(token_frequency, q20=q20, q80=q80)
 
             token_infos.append(TokenInfo(
                 token_id=token_id,
                 token_str=token_str,
                 token_type=token_type,
-                frequency=1.0 / (token_id + 1),  # Approximate frequency
+                frequency=token_frequency,
                 frequency_tier=freq_tier,
-                norm=1.0,
+                norm=float(raw_norms[token_id]),
             ))
 
         # Sample tokens for experiment
@@ -619,6 +844,7 @@ def main(cfg: DictConfig) -> None:
             n_bootstrap=cfg.get("predictive_validity", {}).get("n_bootstrap", 100),
             random_state=cfg.seed,
             failure_threshold=cfg.get("predictive_validity", {}).get("failure_threshold", 0.3),
+            strict_mode=bool(cfg.get("predictive_validity", {}).get("strict_evaluation", True)),
         )
         validity_result = analyzer.analyze(diagnostic_results, stress_test_results)
 
@@ -723,6 +949,13 @@ def main(cfg: DictConfig) -> None:
                 "stress_test_design": "forced_token_minimal_pair" if not use_simulated else "simulated",
                 "stress_test_scoring_mode": stress_scoring_mode,
                 "min_logprob_margin": min_logprob_margin,
+                "frequency_confound_source": frequency_source,
+                "frequency_counts_path": resolved_frequency_path,
+                "norm_confound_source": norm_source,
+                "fail_on_proxy_confounds": fail_on_proxy_confounds,
+                "strict_evaluation": bool(
+                    cfg.get("predictive_validity", {}).get("strict_evaluation", True)
+                ),
             },
         }
 

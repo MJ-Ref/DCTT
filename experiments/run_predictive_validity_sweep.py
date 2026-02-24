@@ -74,6 +74,8 @@ def _run_single(
     scoring_mode: str,
     min_logprob_margin: float,
     compute_device: str | None,
+    frequency_counts_path: str | None,
+    fail_on_proxy_confounds: bool,
 ) -> dict[str, Any]:
     before_latest = _latest_run_dir(repo_root)
     cmd = [
@@ -93,6 +95,13 @@ def _run_single(
     ]
     if compute_device:
         cmd.append(f"compute.device={compute_device}")
+    if frequency_counts_path:
+        cmd.append(
+            "predictive_validity.token_frequency_counts_path="
+            f"{frequency_counts_path}"
+        )
+    if fail_on_proxy_confounds:
+        cmd.append("predictive_validity.fail_on_proxy_confounds=true")
 
     proc = subprocess.run(
         cmd,
@@ -207,6 +216,9 @@ def _write_markdown(
     lines.append(f"- Min logprob margin: `{config['min_logprob_margin']}`")
     if config.get("compute_device"):
         lines.append(f"- Compute device override: `{config['compute_device']}`")
+    if config.get("frequency_counts_path"):
+        lines.append(f"- Frequency counts path: `{config['frequency_counts_path']}`")
+    lines.append(f"- Fail on proxy confounds: `{config['fail_on_proxy_confounds']}`")
     lines.append("")
     lines.append("## Aggregate")
     lines.append("")
@@ -261,6 +273,16 @@ def main() -> None:
         help="Optional compute.device override for run_predictive_validity.py.",
     )
     parser.add_argument(
+        "--frequency-counts-path",
+        default=None,
+        help="Optional predictive_validity.token_frequency_counts_path override.",
+    )
+    parser.add_argument(
+        "--fail-on-proxy-confounds",
+        action="store_true",
+        help="Fail if frequency/norm proxy confounds would be used.",
+    )
+    parser.add_argument(
         "--output-dir",
         default=None,
         help="Optional output dir for sweep summary artifacts.",
@@ -297,6 +319,8 @@ def main() -> None:
                 scoring_mode=args.scoring_mode,
                 min_logprob_margin=args.min_logprob_margin,
                 compute_device=args.compute_device,
+                frequency_counts_path=args.frequency_counts_path,
+                fail_on_proxy_confounds=bool(args.fail_on_proxy_confounds),
             )
             records.append(record)
             print(
@@ -317,6 +341,8 @@ def main() -> None:
         "scoring_mode": str(args.scoring_mode),
         "min_logprob_margin": float(args.min_logprob_margin),
         "compute_device": args.compute_device,
+        "frequency_counts_path": args.frequency_counts_path,
+        "fail_on_proxy_confounds": bool(args.fail_on_proxy_confounds),
     }
 
     payload = {

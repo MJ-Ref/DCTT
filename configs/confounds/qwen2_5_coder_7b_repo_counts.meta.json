@@ -1,0 +1,10 @@
+{
+  "model_name": "Qwen/Qwen2.5-Coder-7B",
+  "revision": "main",
+  "input_root": "/Users/mj/Documents/DCTT",
+  "n_files": 8000,
+  "total_chars": 155746876,
+  "total_tokens": 43892789,
+  "vocab_size": 151643,
+  "output_path": "/Users/mj/Documents/DCTT/configs/confounds/qwen2_5_coder_7b_repo_counts.npy"
+}

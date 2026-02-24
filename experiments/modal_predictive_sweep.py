@@ -74,6 +74,30 @@ hf_secret = modal.Secret.from_name(
 )
 
 
+def _resolve_local_path(candidate: str) -> Path:
+    """Resolve a user-provided local path relative to repository root."""
+    path = Path(candidate).expanduser()
+    if path.is_absolute():
+        return path
+    return (repo_root / path).resolve()
+
+
+def _stage_frequency_counts_to_volume(local_candidate: str) -> str:
+    """Upload local frequency counts file to shared volume and return remote path."""
+    local_path = _resolve_local_path(local_candidate)
+    if not local_path.exists() or not local_path.is_file():
+        raise FileNotFoundError(
+            f"Frequency counts file not found: {local_path}. "
+            "Provide a valid local .npy/.json path."
+        )
+
+    remote_rel = f"confounds/{local_path.name}"
+    with artifact_volume.batch_upload(force=True) as batch:
+        batch.put_file(str(local_path), remote_rel)
+
+    return f"{VOLUME_MOUNT}/{remote_rel}"
+
+
 @app.function(
     image=image,
     gpu="A100",
@@ -93,10 +117,24 @@ def run_modal_sweep(  # noqa: PLR0913
     scoring_mode: str = "logprob_choice",
     min_logprob_margin: float = 0.0,
     compute_device: str = "cuda",
+    frequency_counts_path: str = "",
+    fail_on_proxy_confounds: bool = False,
 ) -> dict[str, Any]:
     """Run predictive-validity sweep on Modal GPU and return aggregate metrics."""
     stamp = datetime.utcnow().strftime("%Y-%m-%d_%H-%M-%S")
     output_dir = f"{SWEEP_ROOT}/{stamp}"
+    resolved_frequency_counts_path = frequency_counts_path.strip()
+    if resolved_frequency_counts_path:
+        path_obj = Path(resolved_frequency_counts_path)
+        if not path_obj.is_absolute():
+            repo_candidate = (Path(REPO_REMOTE_DIR) / path_obj).resolve()
+            if repo_candidate.exists():
+                resolved_frequency_counts_path = str(repo_candidate)
+            else:
+                # Fallback for staged artifacts uploaded by local entrypoint.
+                staged_candidate = (Path(VOLUME_MOUNT) / "confounds" / path_obj.name).resolve()
+                if staged_candidate.exists():
+                    resolved_frequency_counts_path = str(staged_candidate)
 
     cmd = [
         sys.executable,
@@ -122,6 +160,10 @@ def run_modal_sweep(  # noqa: PLR0913
         "--output-dir",
         output_dir,
     ]
+    if resolved_frequency_counts_path:
+        cmd.extend(["--frequency-counts-path", resolved_frequency_counts_path])
+    if fail_on_proxy_confounds:
+        cmd.append("--fail-on-proxy-confounds")
 
     env = {
         **os.environ,
@@ -171,8 +213,18 @@ def main(  # noqa: PLR0913
     scoring_mode: str = "logprob_choice",
     min_logprob_margin: float = 0.0,
     compute_device: str = "cuda",
+    frequency_counts_path: str = "",
+    fail_on_proxy_confounds: bool = False,
 ) -> None:
     """Run Modal sweep and print compact summary."""
+    staged_frequency_counts_path = frequency_counts_path
+    if frequency_counts_path and not frequency_counts_path.startswith(f"{VOLUME_MOUNT}/"):
+        staged_frequency_counts_path = _stage_frequency_counts_to_volume(frequency_counts_path)
+        print(
+            f"[staged] frequency counts: {frequency_counts_path} -> "
+            f"{staged_frequency_counts_path}"
+        )
+
     result = run_modal_sweep.remote(
         models=models,
         seeds=seeds,
@@ -183,5 +235,7 @@ def main(  # noqa: PLR0913
         scoring_mode=scoring_mode,
         min_logprob_margin=min_logprob_margin,
         compute_device=compute_device,
+        frequency_counts_path=staged_frequency_counts_path,
+        fail_on_proxy_confounds=fail_on_proxy_confounds,
     )
     print(json.dumps(result, indent=2))

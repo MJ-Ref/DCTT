@@ -40,6 +40,54 @@ plt.rcParams.update({
 })
 
 
+def _predictive_proxy_from_sweep(
+    sweep_payload: dict,
+    preferred_models: tuple[str, ...] = ("qwen2_5_coder_7b",),
+) -> dict | None:
+    """Build predictive-validity proxy metrics from sweep aggregate means."""
+    aggregate = sweep_payload.get("aggregate", {})
+    if not aggregate:
+        return None
+
+    model_name = None
+    for candidate in preferred_models:
+        if candidate in aggregate:
+            model_name = candidate
+            break
+    if model_name is None:
+        model_name = sorted(aggregate.keys())[0]
+
+    row = aggregate.get(model_name, {})
+    if not row:
+        return None
+
+    def _auc_block(mean_key: str, std_key: str) -> dict:
+        mean = float(row.get(mean_key, 0.0))
+        std = float(row.get(std_key, 0.0))
+        return {
+            "auc": mean,
+            "auc_ci": [
+                max(0.0, mean - std),
+                min(1.0, mean + std),
+            ],
+        }
+
+    return {
+        "config": {
+            "model": model_name,
+            "use_simulated_failures": False,
+            "source": "predictive_validity_sweep_aggregate",
+            "n_runs": int(row.get("n_runs", 0)),
+        },
+        "model_comparison": {
+            "baseline": _auc_block("baseline_auc_mean", "baseline_auc_std"),
+            "geometry": _auc_block("geometry_auc_mean", "geometry_auc_std"),
+            "full": _auc_block("full_auc_mean", "full_auc_std"),
+        },
+        "summary": {},
+    }
+
+
 def load_results(output_dir: Path) -> dict:
     """Load all experiment results."""
     results = {}
@@ -118,9 +166,47 @@ def load_results(output_dir: Path) -> dict:
     if predictive_runs:
         results["predictive_validity_runs"] = predictive_runs
 
-    # Load latest predictive-validity sweep aggregate if available
+    # Load predictive-validity sweep aggregate with protocol lock priority.
     sweep_root = output_dir / "sweeps" / "predictive_validity"
     if sweep_root.exists():
+        lock_path = sweep_root / "PROTOCOL_LOCK.json"
+        if lock_path.exists():
+            lock_payload = load_json_safe(lock_path)
+            if lock_payload is None:
+                raise RuntimeError(f"Unreadable protocol lock file: {lock_path}")
+
+            locked_sweep = lock_payload.get("sweep_results_path")
+            if not isinstance(locked_sweep, str) or not locked_sweep:
+                raise RuntimeError(
+                    f"Protocol lock missing sweep_results_path: {lock_path}"
+                )
+
+            locked_path = Path(locked_sweep)
+            if not locked_path.is_absolute():
+                locked_path = (sweep_root / locked_path).resolve()
+
+            locked_payload = load_json_safe(locked_path)
+            if locked_payload is None or not locked_payload.get("aggregate"):
+                raise RuntimeError(
+                    "Protocol lock points to missing/invalid sweep aggregate: "
+                    f"{locked_path}"
+                )
+
+            results["predictive_validity_sweep"] = locked_payload
+            results_paths["predictive_validity_sweep"] = str(locked_path)
+            results["_predictive_protocol_lock"] = lock_payload
+            proxy = _predictive_proxy_from_sweep(locked_payload)
+            if proxy is not None:
+                results["predictive_validity"] = proxy
+                results_paths["predictive_validity"] = (
+                    f"{locked_path}#aggregate:{proxy['config']['model']}"
+                )
+            logger.info(
+                "Loaded predictive validity sweep from protocol lock: %s",
+                locked_path,
+            )
+            return results
+
         sweep_candidates = sorted(
             sweep_root.glob("*/sweep_results.json"),
             key=lambda path: path.stat().st_mtime,
@@ -151,8 +237,15 @@ def load_results(output_dir: Path) -> dict:
         if best_sweep_payload is not None and best_sweep_path is not None:
             results["predictive_validity_sweep"] = best_sweep_payload
             results_paths["predictive_validity_sweep"] = str(best_sweep_path)
+            proxy = _predictive_proxy_from_sweep(best_sweep_payload)
+            if proxy is not None:
+                results["predictive_validity"] = proxy
+                results_paths["predictive_validity"] = (
+                    f"{best_sweep_path}#aggregate:{proxy['config']['model']}"
+                )
             logger.info(
-                "Loaded predictive validity sweep from %s (score=%s)",
+                "Loaded predictive validity sweep from %s (score=%s). "
+                "No protocol lock found.",
                 best_sweep_path,
                 best_score,
             )

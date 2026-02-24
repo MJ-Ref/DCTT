@@ -56,6 +56,9 @@ predictive_validity:
   n_bootstrap: 100  # Bootstrap samples for confidence intervals
   failure_threshold: 0.3  # Threshold for binarizing failure rate
   use_simulated_failures: false  # Synthetic labels are smoke-test only
+  strict_evaluation: true  # Raise on evaluator failures instead of silent fallback
+  token_frequency_counts_path: null  # Optional .npy/.json token counts for real frequency confounds
+  fail_on_proxy_confounds: false  # If true, fail when frequency/norm proxies are used
 
 # Repair settings
 repair:

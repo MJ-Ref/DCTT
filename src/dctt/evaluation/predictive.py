@@ -13,6 +13,7 @@ Key analyses:
 from __future__ import annotations
 
 from dataclasses import dataclass
+import logging
 from typing import TYPE_CHECKING
 
 import numpy as np
@@ -20,6 +21,8 @@ from numpy.typing import NDArray
 
 if TYPE_CHECKING:
     from dctt.core.types import DiagnosticResult
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -102,6 +105,7 @@ class PredictiveValidityAnalyzer:
         n_bootstrap: int = 100,
         random_state: int = 42,
         failure_threshold: float = 0.3,
+        strict_mode: bool = True,
     ) -> None:
         """Initialize analyzer.
 
@@ -109,10 +113,12 @@ class PredictiveValidityAnalyzer:
             n_bootstrap: Number of bootstrap samples for CI.
             random_state: Random seed for reproducibility.
             failure_threshold: Threshold for binarizing failure rate.
+            strict_mode: Raise on evaluator failures instead of silent fallback.
         """
         self.n_bootstrap = n_bootstrap
         self.random_state = random_state
         self.failure_threshold = failure_threshold
+        self.strict_mode = strict_mode
 
     def analyze(
         self,
@@ -335,77 +341,74 @@ class PredictiveValidityAnalyzer:
         features: list[str],
     ) -> ModelComparison:
         """Evaluate a model with bootstrap confidence intervals."""
-        try:
-            from sklearn.linear_model import LogisticRegression
-            from sklearn.preprocessing import StandardScaler
-            from sklearn.metrics import roc_auc_score, average_precision_score
+        from sklearn.linear_model import LogisticRegression
+        from sklearn.preprocessing import StandardScaler
+        from sklearn.metrics import roc_auc_score, average_precision_score
 
-            # Handle edge cases
-            if len(np.unique(y)) < 2:
-                return ModelComparison(
-                    name=name, features=features,
-                    auc=0.5, auc_ci_low=0.5, auc_ci_high=0.5,
-                    pr_auc=y.mean(), pr_auc_ci_low=y.mean(), pr_auc_ci_high=y.mean(),
-                    n_samples=len(y)
-                )
-
-            scaler = StandardScaler()
-            X_scaled = scaler.fit_transform(X)
-
-            # Use cross-validation predictions to avoid overfitting
-            model = LogisticRegression(max_iter=1000, random_state=self.random_state)
-
-            try:
-                y_pred = self._cross_val_predict_proba(X_scaled, y, model)
-            except:
-                # Fall back to simple fit if CV fails
-                model.fit(X_scaled, y)
-                y_pred = model.predict_proba(X_scaled)[:, 1]
-
-            auc = roc_auc_score(y, y_pred)
-            pr_auc = average_precision_score(y, y_pred)
-
-            # Bootstrap for confidence intervals
-            rng = np.random.default_rng(self.random_state)
-            auc_samples = []
-            pr_auc_samples = []
-
-            for _ in range(self.n_bootstrap):
-                idx = rng.choice(len(y), size=len(y), replace=True)
-                if len(np.unique(y[idx])) < 2:
-                    continue
-                try:
-                    auc_samples.append(roc_auc_score(y[idx], y_pred[idx]))
-                    pr_auc_samples.append(average_precision_score(y[idx], y_pred[idx]))
-                except:
-                    continue
-
-            if auc_samples:
-                auc_ci_low, auc_ci_high = np.percentile(auc_samples, [2.5, 97.5])
-                pr_auc_ci_low, pr_auc_ci_high = np.percentile(pr_auc_samples, [2.5, 97.5])
-            else:
-                auc_ci_low, auc_ci_high = auc, auc
-                pr_auc_ci_low, pr_auc_ci_high = pr_auc, pr_auc
-
-            return ModelComparison(
-                name=name,
-                features=features,
-                auc=auc,
-                auc_ci_low=auc_ci_low,
-                auc_ci_high=auc_ci_high,
-                pr_auc=pr_auc,
-                pr_auc_ci_low=pr_auc_ci_low,
-                pr_auc_ci_high=pr_auc_ci_high,
-                n_samples=len(y),
-            )
-
-        except Exception as e:
+        # Handle edge cases
+        if len(np.unique(y)) < 2:
             return ModelComparison(
                 name=name, features=features,
                 auc=0.5, auc_ci_low=0.5, auc_ci_high=0.5,
-                pr_auc=0.5, pr_auc_ci_low=0.5, pr_auc_ci_high=0.5,
+                pr_auc=y.mean(), pr_auc_ci_low=y.mean(), pr_auc_ci_high=y.mean(),
                 n_samples=len(y)
             )
+
+        scaler = StandardScaler()
+        X_scaled = scaler.fit_transform(X)
+
+        # Use cross-validation predictions to avoid overfitting
+        model = LogisticRegression(max_iter=1000, random_state=self.random_state)
+
+        try:
+            y_pred = self._cross_val_predict_proba(X_scaled, y, model)
+        except Exception as exc:
+            if self.strict_mode:
+                raise RuntimeError(f"Cross-validated prediction failed for model '{name}'") from exc
+            logger.warning(
+                "Falling back to direct fit for model '%s' due to CV failure: %s",
+                name,
+                exc,
+            )
+            model.fit(X_scaled, y)
+            y_pred = model.predict_proba(X_scaled)[:, 1]
+
+        auc = roc_auc_score(y, y_pred)
+        pr_auc = average_precision_score(y, y_pred)
+
+        # Bootstrap for confidence intervals
+        rng = np.random.default_rng(self.random_state)
+        auc_samples = []
+        pr_auc_samples = []
+
+        for _ in range(self.n_bootstrap):
+            idx = rng.choice(len(y), size=len(y), replace=True)
+            if len(np.unique(y[idx])) < 2:
+                continue
+            try:
+                auc_samples.append(roc_auc_score(y[idx], y_pred[idx]))
+                pr_auc_samples.append(average_precision_score(y[idx], y_pred[idx]))
+            except ValueError:
+                continue
+
+        if auc_samples:
+            auc_ci_low, auc_ci_high = np.percentile(auc_samples, [2.5, 97.5])
+            pr_auc_ci_low, pr_auc_ci_high = np.percentile(pr_auc_samples, [2.5, 97.5])
+        else:
+            auc_ci_low, auc_ci_high = auc, auc
+            pr_auc_ci_low, pr_auc_ci_high = pr_auc, pr_auc
+
+        return ModelComparison(
+            name=name,
+            features=features,
+            auc=auc,
+            auc_ci_low=auc_ci_low,
+            auc_ci_high=auc_ci_high,
+            pr_auc=pr_auc,
+            pr_auc_ci_low=pr_auc_ci_low,
+            pr_auc_ci_high=pr_auc_ci_high,
+            n_samples=len(y),
+        )
 
     def _compute_feature_importance(
         self,
@@ -414,24 +417,26 @@ class PredictiveValidityAnalyzer:
         feature_names: list[str],
     ) -> dict[str, float]:
         """Compute feature importance using coefficient magnitudes."""
-        try:
-            from sklearn.linear_model import LogisticRegression
-            from sklearn.preprocessing import StandardScaler
+        from sklearn.linear_model import LogisticRegression
+        from sklearn.preprocessing import StandardScaler
 
-            if len(np.unique(y)) < 2:
-                return {f: 0.0 for f in feature_names}
-
-            scaler = StandardScaler()
-            X_scaled = scaler.fit_transform(X)
-
-            model = LogisticRegression(max_iter=1000, random_state=self.random_state)
-            model.fit(X_scaled, y)
-
-            importance = dict(zip(feature_names, np.abs(model.coef_[0])))
-            return importance
-
-        except:
+        if len(np.unique(y)) < 2:
             return {f: 0.0 for f in feature_names}
+
+        scaler = StandardScaler()
+        X_scaled = scaler.fit_transform(X)
+
+        model = LogisticRegression(max_iter=1000, random_state=self.random_state)
+        try:
+            model.fit(X_scaled, y)
+        except Exception as exc:
+            if self.strict_mode:
+                raise RuntimeError("Feature importance fit failed") from exc
+            logger.warning("Feature importance fit failed; returning zeros: %s", exc)
+            return {f: 0.0 for f in feature_names}
+
+        importance = dict(zip(feature_names, np.abs(model.coef_[0])))
+        return importance
 
     def _run_feature_ablation(
         self,
@@ -443,46 +448,51 @@ class PredictiveValidityAnalyzer:
         """Run leave-one-out feature ablation."""
         ablations = []
 
-        try:
-            from sklearn.linear_model import LogisticRegression
-            from sklearn.preprocessing import StandardScaler
-            from sklearn.metrics import roc_auc_score
+        from sklearn.linear_model import LogisticRegression
+        from sklearn.preprocessing import StandardScaler
+        from sklearn.metrics import roc_auc_score
 
-            if len(np.unique(y)) < 2:
-                return []
+        if len(np.unique(y)) < 2:
+            return []
 
-            for i, feature in enumerate(feature_names):
-                # Create X without this feature
-                mask = [j for j in range(len(feature_names)) if j != i]
-                X_ablated = X[:, mask]
+        for i, feature in enumerate(feature_names):
+            # Create X without this feature
+            mask = [j for j in range(len(feature_names)) if j != i]
+            X_ablated = X[:, mask]
 
-                scaler = StandardScaler()
-                X_scaled = scaler.fit_transform(X_ablated)
+            scaler = StandardScaler()
+            X_scaled = scaler.fit_transform(X_ablated)
 
-                model = LogisticRegression(max_iter=1000, random_state=self.random_state)
+            model = LogisticRegression(max_iter=1000, random_state=self.random_state)
 
-                try:
-                    y_pred = self._cross_val_predict_proba(X_scaled, y, model)
-                    auc_without = roc_auc_score(y, y_pred)
-                except:
-                    model.fit(X_scaled, y)
-                    y_pred = model.predict_proba(X_scaled)[:, 1]
-                    auc_without = roc_auc_score(y, y_pred)
+            try:
+                y_pred = self._cross_val_predict_proba(X_scaled, y, model)
+                auc_without = roc_auc_score(y, y_pred)
+            except Exception as exc:
+                if self.strict_mode:
+                    raise RuntimeError(
+                        f"Feature ablation failed for feature '{feature}'"
+                    ) from exc
+                logger.warning(
+                    "Feature ablation fallback for '%s' after CV failure: %s",
+                    feature,
+                    exc,
+                )
+                model.fit(X_scaled, y)
+                y_pred = model.predict_proba(X_scaled)[:, 1]
+                auc_without = roc_auc_score(y, y_pred)
 
-                ablations.append(FeatureAblation(
-                    feature_removed=feature,
-                    auc_without=auc_without,
-                    auc_drop=full_auc - auc_without,
-                    importance_rank=0,  # Set later
-                ))
+            ablations.append(FeatureAblation(
+                feature_removed=feature,
+                auc_without=auc_without,
+                auc_drop=full_auc - auc_without,
+                importance_rank=0,  # Set later
+            ))
 
-            # Rank by importance (largest AUC drop = most important)
-            ablations.sort(key=lambda x: x.auc_drop, reverse=True)
-            for i, ablation in enumerate(ablations):
-                ablation.importance_rank = i + 1
-
-        except:
-            pass
+        # Rank by importance (largest AUC drop = most important)
+        ablations.sort(key=lambda x: x.auc_drop, reverse=True)
+        for i, ablation in enumerate(ablations):
+            ablation.importance_rank = i + 1
 
         return ablations
 
@@ -497,52 +507,55 @@ class PredictiveValidityAnalyzer:
         """Analyze predictive power within each bucket."""
         analyses = []
 
-        try:
-            from sklearn.linear_model import LogisticRegression
-            from sklearn.preprocessing import StandardScaler
-            from sklearn.metrics import roc_auc_score, average_precision_score
+        from sklearn.linear_model import LogisticRegression
+        from sklearn.preprocessing import StandardScaler
+        from sklearn.metrics import roc_auc_score, average_precision_score
 
-            # Group by bucket
-            bucket_data: dict[tuple, list[int]] = {}
-            for i, bucket in enumerate(buckets):
-                if bucket is None:
-                    continue
-                if bucket not in bucket_data:
-                    bucket_data[bucket] = []
-                bucket_data[bucket].append(i)
+        # Group by bucket
+        bucket_data: dict[tuple, list[int]] = {}
+        for i, bucket in enumerate(buckets):
+            if bucket is None:
+                continue
+            if bucket not in bucket_data:
+                bucket_data[bucket] = []
+            bucket_data[bucket].append(i)
 
-            for bucket, indices in bucket_data.items():
-                if len(indices) < 20:  # Skip small buckets
-                    continue
+        for bucket, indices in bucket_data.items():
+            if len(indices) < 20:  # Skip small buckets
+                continue
 
-                X_bucket = X[indices][:, geometry_idx]
-                y_bucket = y[indices]
+            X_bucket = X[indices][:, geometry_idx]
+            y_bucket = y[indices]
 
-                if len(np.unique(y_bucket)) < 2:
-                    continue
+            if len(np.unique(y_bucket)) < 2:
+                continue
 
-                try:
-                    scaler = StandardScaler()
-                    X_scaled = scaler.fit_transform(X_bucket)
+            try:
+                scaler = StandardScaler()
+                X_scaled = scaler.fit_transform(X_bucket)
 
-                    model = LogisticRegression(max_iter=1000, random_state=self.random_state)
-                    y_pred = self._cross_val_predict_proba(X_scaled, y_bucket, model)
+                model = LogisticRegression(max_iter=1000, random_state=self.random_state)
+                y_pred = self._cross_val_predict_proba(X_scaled, y_bucket, model)
 
-                    auc = roc_auc_score(y_bucket, y_pred)
-                    pr_auc = average_precision_score(y_bucket, y_pred)
+                auc = roc_auc_score(y_bucket, y_pred)
+                pr_auc = average_precision_score(y_bucket, y_pred)
 
-                    analyses.append(BucketAnalysis(
-                        bucket=bucket,
-                        n_samples=len(indices),
-                        auc=auc,
-                        pr_auc=pr_auc,
-                        geometry_predicts=auc > 0.55,
-                    ))
-                except:
-                    continue
-
-        except:
-            pass
+                analyses.append(BucketAnalysis(
+                    bucket=bucket,
+                    n_samples=len(indices),
+                    auc=auc,
+                    pr_auc=pr_auc,
+                    geometry_predicts=auc > 0.55,
+                ))
+            except Exception as exc:
+                if self.strict_mode:
+                    raise RuntimeError(f"Within-bucket analysis failed for bucket={bucket}") from exc
+                logger.warning(
+                    "Skipping bucket %s after analysis failure: %s",
+                    bucket,
+                    exc,
+                )
+                continue
 
         return analyses
 
