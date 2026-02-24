@@ -345,14 +345,14 @@ And one qualitative table:
 ~~* **Overall**: *Weak reject / borderline* (mainly because the repair claim is not yet supported and the causal evaluation story is incomplete end-to-end).~~
 
 > **UPDATE (2026-01-24):** With cluster-level repair and causal framework implemented:
-> * **Overall**: *Borderline* - Mechanistic repair claim supported (geometry improves vs placebo); predictive validity shows geometry predicts beyond confounds; behavioral causal claim NOT yet supported (DiD not significant).
+> * **Overall**: *Borderline* - Mechanistic repair claim supported (geometry improves vs placebo); strict predictive gate is **FAIL** (geometry-only predictors do not beat confound baselines); behavioral causal claim NOT yet supported (DiD not significant).
 > * **To reach accept**:
 >   1. Run real stress tests with model inference (not simulated)
 >   2. Better matching: continuous confounds + baseline failure
 >   3. Proper inference: clusters as experimental unit (effective n=5)
 >   4. Multi-model evidence (Llama, Mistral)
 
-* **If reframed diagnostics-first + strong predictive validity across models**: this could plausibly move into *borderline accept* territory for an analysis-oriented venue/workshop, and potentially main-track if the results are unusually clean and the causal story is tight.
+* **If reframed as mechanistic-positive + predictive-negative (hard pivot)**: this can still plausibly reach *borderline accept* territory for analysis-oriented venues/workshops by foregrounding strict anti-overclaim methodology and reproducible negative results.
 
 ---
 
