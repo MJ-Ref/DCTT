@@ -1,43 +1,41 @@
 version: 1
 name: hard_pivot_submission_rc2
-created_at_utc: "2026-02-24T21:20:00Z"
-notes: "Claim-bearing submission package lock for hard-pivot manuscript framing."
-
+created_at_utc: '2026-02-24T23:54:04.039522+00:00'
+notes: Claim-bearing submission package lock for hard-pivot manuscript framing.
 artifacts:
-  - id: hard_pivot_report_json
-    path: outputs/sweeps/predictive_validity/HARD_PIVOT_REPORT.json
-    sha256: "2d384688cc8a5e834f9adcf3d6314cfc4b62b2c0c52903c257c9c3a73a610fe3"
-  - id: hard_pivot_report_md
-    path: outputs/sweeps/predictive_validity/HARD_PIVOT_REPORT.md
-    sha256: "1171e1c7231f623a2a36f0f4ea9d7397de33f3c21017945d956adff62c61360f"
-  - id: publication_assets_lock
-    path: configs/paper/publication_assets_lock.yaml
-    sha256: "e5c71e3be3e988cd6b6658ee7f1582819fffb67157bcd08bbf9e75ff4b476f42"
-  - id: fig0_pipeline_svg
-    path: outputs/figures/fig0_pipeline_diagram.svg
-    sha256: "8246768af241903f15a09a62c6ed53bf9cffc4423bcc2fe5fb5c7e36e3ba33d5"
-  - id: fig1_predictive_pdf
-    path: outputs/figures/fig1_predictive_validity.pdf
-    sha256: "21211282c3332ab4209bebb0501313ba72c3acef80daaf24d459339c020c375e"
-  - id: fig2_cluster_pdf
-    path: outputs/figures/fig2_cluster_repair.pdf
-    sha256: "dfd91f14697d797d66853bcf23330b0cdc3617b99125645f8a0822ecb8c9bfa1"
-  - id: fig3_causal_pdf
-    path: outputs/figures/fig3_causal_geometry.pdf
-    sha256: "eba57b7183d91edeafa40fe77432b13d954ba143565bfd7e28ab711e87541d27"
-  - id: fig4_replication_pdf
-    path: outputs/figures/fig4_model_replication.pdf
-    sha256: "ef4c75e299739eb2eef67562119341eb5d0ecf4597c85a276d9508ab2b1f664d"
-  - id: table1_main
-    path: outputs/figures/table1_main_results.txt
-    sha256: "ba67ea203de5f7ee9513ca22be49d867f161a8aa855c04447cab7f990d11fe8d"
-  - id: table2_flagged
-    path: outputs/figures/table2_flagged_tokens.txt
-    sha256: "363a17dde0bcbb62e236e721d72de33db857a31c7cbbb16ff46e2275e522c159"
-  - id: table3_replication
-    path: outputs/figures/table3_model_replication.txt
-    sha256: "042beb644468641ef000c4109133fce747fbb3ad99b54147dc721af866a38fdf"
-
+- id: hard_pivot_report_json
+  path: outputs/sweeps/predictive_validity/HARD_PIVOT_REPORT.json
+  sha256: 2d384688cc8a5e834f9adcf3d6314cfc4b62b2c0c52903c257c9c3a73a610fe3
+- id: hard_pivot_report_md
+  path: outputs/sweeps/predictive_validity/HARD_PIVOT_REPORT.md
+  sha256: 1171e1c7231f623a2a36f0f4ea9d7397de33f3c21017945d956adff62c61360f
+- id: publication_assets_lock
+  path: configs/paper/publication_assets_lock.yaml
+  sha256: e5c71e3be3e988cd6b6658ee7f1582819fffb67157bcd08bbf9e75ff4b476f42
+- id: fig0_pipeline_svg
+  path: outputs/figures/fig0_pipeline_diagram.svg
+  sha256: d2d2caaddef2e75c91833f635cb7af8e40a1e7ad756779c83b5c9c11f1f1003e
+- id: fig1_predictive_pdf
+  path: outputs/figures/fig1_predictive_validity.pdf
+  sha256: 21d400c4ced40f9bbbcf17db9d376139747366dbd0744039381389ede904eb7c
+- id: fig2_cluster_pdf
+  path: outputs/figures/fig2_cluster_repair.pdf
+  sha256: 8ca9e0d8ec61fa3d450ee4031ebee7096fd10a844d0d18bc53d3805f0ee899f4
+- id: fig3_causal_pdf
+  path: outputs/figures/fig3_causal_geometry.pdf
+  sha256: 18663682d59c5841a883c4b3b6f13481e50c58fa597a421c68536c3083da3d3f
+- id: fig4_replication_pdf
+  path: outputs/figures/fig4_model_replication.pdf
+  sha256: a644e295aec3ec52a494ba2a7fa09a4702907cce3500e81673cc35e2814f8b52
+- id: table1_main
+  path: outputs/figures/table1_main_results.txt
+  sha256: ba67ea203de5f7ee9513ca22be49d867f161a8aa855c04447cab7f990d11fe8d
+- id: table2_flagged
+  path: outputs/figures/table2_flagged_tokens.txt
+  sha256: 363a17dde0bcbb62e236e721d72de33db857a31c7cbbb16ff46e2275e522c159
+- id: table3_replication
+  path: outputs/figures/table3_model_replication.txt
+  sha256: 042beb644468641ef000c4109133fce747fbb3ad99b54147dc721af866a38fdf
 claim_checks:
   strict_predictive_gate: FAIL
   total_runs: 20
@@ -47,15 +45,13 @@ claim_checks:
   pooled_geometry_positive_runs: 1
   pooled_full_positive_runs: 4
   pooled_geometry_ci:
-    - -0.16836703533197275
-    - -0.0879381993686312
+  - -0.16836703533197275
+  - -0.0879381993686312
   pooled_full_ci:
-    - -0.02311898678734968
-    - -0.0003505607497982389
-
+  - -0.02311898678734968
+  - -0.0003505607497982389
 tolerances:
-  float_abs: 1.0e-9
-
+  float_abs: 1.0e-09
 verification:
   require_manifest_consistency: true
   manifest_path: outputs/figures/PUBLICATION_MANIFEST.json
