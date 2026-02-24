@@ -70,9 +70,13 @@ class ForcedTokenMinimalPairTest(StressTest):
         self,
         control_map: dict[int, tuple[int, str]],
         seed: int = 42,
+        scoring_mode: str = "generation",
+        min_logprob_margin: float = 0.0,
     ) -> None:
         self.control_map = control_map
         self.seed = seed
+        self.scoring_mode = scoring_mode
+        self.min_logprob_margin = float(min_logprob_margin)
         self._templates = [
             (
                 "Copy the value between <token> and </token> exactly once.\n"
@@ -195,28 +199,78 @@ class ForcedTokenMinimalPairTest(StressTest):
             control_response = ""
             target_passed = False
             control_passed = False
+            target_margin: float | None = None
+            control_margin: float | None = None
+            target_scores: dict[str, float] | None = None
+            control_scores: dict[str, float] | None = None
 
-            try:
-                target_response = model_fn(case["target_prompt"])
-                target_passed = self._passes_case(
-                    target_response,
-                    case["target_expected"],
-                    bool(case["target_escaped_mode"]),
-                )
-            except Exception as exc:
-                target_response = f"<error:{exc}>"
-                target_passed = False
+            use_logprob_choice = (
+                self.scoring_mode == "logprob_choice"
+                and hasattr(model_fn, "score_options")
+            )
 
-            try:
-                control_response = model_fn(case["control_prompt"])
-                control_passed = self._passes_case(
-                    control_response,
-                    case["control_expected"],
-                    bool(case["control_escaped_mode"]),
-                )
-            except Exception as exc:
-                control_response = f"<error:{exc}>"
-                control_passed = False
+            if use_logprob_choice:
+                try:
+                    target_eval = model_fn.score_options(
+                        case["target_prompt"],
+                        [case["target_expected"], case["control_expected"]],
+                    )
+                    target_margin = float(target_eval.get("margin", 0.0))
+                    target_scores = {
+                        str(k): float(v)
+                        for k, v in target_eval.get("scores", {}).items()
+                    }
+                    target_best = str(target_eval.get("best_option", ""))
+                    target_passed = (
+                        target_best == case["target_expected"]
+                        and target_margin >= self.min_logprob_margin
+                    )
+                    target_response = "<logprob-choice>"
+                except Exception as exc:
+                    target_response = f"<error:{exc}>"
+                    target_passed = False
+
+                try:
+                    control_eval = model_fn.score_options(
+                        case["control_prompt"],
+                        [case["control_expected"], case["target_expected"]],
+                    )
+                    control_margin = float(control_eval.get("margin", 0.0))
+                    control_scores = {
+                        str(k): float(v)
+                        for k, v in control_eval.get("scores", {}).items()
+                    }
+                    control_best = str(control_eval.get("best_option", ""))
+                    control_passed = (
+                        control_best == case["control_expected"]
+                        and control_margin >= self.min_logprob_margin
+                    )
+                    control_response = "<logprob-choice>"
+                except Exception as exc:
+                    control_response = f"<error:{exc}>"
+                    control_passed = False
+            else:
+                try:
+                    target_response = model_fn(case["target_prompt"])
+                    target_passed = self._passes_case(
+                        target_response,
+                        case["target_expected"],
+                        bool(case["target_escaped_mode"]),
+                    )
+                except Exception as exc:
+                    target_response = f"<error:{exc}>"
+                    target_passed = False
+
+                try:
+                    control_response = model_fn(case["control_prompt"])
+                    control_passed = self._passes_case(
+                        control_response,
+                        case["control_expected"],
+                        bool(case["control_escaped_mode"]),
+                    )
+                except Exception as exc:
+                    control_response = f"<error:{exc}>"
+                    control_passed = False
 
             if not target_passed:
                 target_failures += 1
@@ -234,6 +288,11 @@ class ForcedTokenMinimalPairTest(StressTest):
                 "control_passed": control_passed,
                 "target_response": target_response[:400],
                 "control_response": control_response[:400],
+                "scoring_mode": "logprob_choice" if use_logprob_choice else "generation",
+                "target_margin": target_margin,
+                "control_margin": control_margin,
+                "target_scores": target_scores or {},
+                "control_scores": control_scores or {},
             })
 
         total_cases = len(cases)
@@ -250,6 +309,8 @@ class ForcedTokenMinimalPairTest(StressTest):
             details={
                 "control_token_id": cases[0]["control_token_id"] if cases else token_id,
                 "control_token_str": cases[0]["control_token_str"] if cases else token_str,
+                "scoring_mode": self.scoring_mode,
+                "min_logprob_margin": self.min_logprob_margin,
                 "control_failure_rate": control_failure_rate,
                 "failure_gap": target_failure_rate - control_failure_rate,
                 "cases": details,

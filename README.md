@@ -264,11 +264,26 @@ Full vocabulary census on 152,064 tokens (3,584 dimensions):
 
 ### Predictive Validity Artifact Status
 
-Latest real-label predictive-validity runs (forced-token minimal-pair stress tests):
-- `Qwen/Qwen2.5-7B`: baseline AUC `0.732`, geometry AUC `0.679`, full AUC `0.776`
-- `Qwen/Qwen2.5-Coder-7B`: baseline AUC `0.489`, geometry AUC `0.195`, full AUC `0.390`
+Latest multi-seed real-label sweep (forced-token minimal-pair, `logprob_choice` scoring):
+- `qwen2_5_coder_7b` (2 seeds, 120 tokens/run): delta mean `-0.005` (positive in 1/2 runs)
+- `qwen2_5_7b` (2 seeds, 120 tokens/run): delta mean `-0.111` (positive in 1/2 runs)
 
-Current interpretation: geometry-only features do **not** beat confound baselines in these real-label runs, so the predictive claim is not yet supported for publication.
+Current interpretation: geometry-only signal is unstable and slightly negative on average in real-label runs, so the predictive claim is not yet supported for publication.
+
+Reproduce with:
+
+```bash
+python experiments/run_predictive_validity_sweep.py \
+  --models qwen2_5_coder_7b,qwen2_5_7b \
+  --seeds 42,43 \
+  --sample-size 120 \
+  --n-prompts 3 \
+  --scoring-mode logprob_choice \
+  --compute-device auto
+
+# For Modal/cloud Linux GPU:
+#   --compute-device cuda
+```
 
 ## Project Status
 

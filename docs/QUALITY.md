@@ -15,7 +15,7 @@ Current state of DCTT components and what needs improvement.
 | Single-token repair | C | Works but doesn't improve geometry |
 | Cluster repair | A | Key breakthrough, validated |
 | Stress tests | B | Forced-token minimal-pair design implemented |
-| Predictive validity | B | Real-label runs complete; geometry signal currently weak |
+| Predictive validity | B | Multi-seed real-label sweeps complete; signal weak/unstable |
 | Causal framework | B | Mechanistic OK, behavioral incomplete |
 | Documentation | B+ | Good coverage, could use more examples |
 | Test coverage | B+ | 50 tests including integration smoke coverage |
@@ -45,7 +45,7 @@ Current state of DCTT components and what needs improvement.
 ### Predictive Validity Signal (Priority: High)
 **Problem:** In real-label runs, geometry-only underperforms confound baselines
 **Impact:** RQ1 claim is not yet publication-strength
-**Solution:** Increase sample size, improve behavioral labels, and test stronger metrics/features
+**Solution:** Increase sample size/seeds further, improve behavioral labels, and test stronger metrics/features
 
 ### Causal Behavioral Evidence (Priority: High)
 **Problem:** DiD not significant, outcomes simulated
@@ -53,7 +53,7 @@ Current state of DCTT components and what needs improvement.
 **Solution:** Real model inference with embedding injection
 
 ### Multi-Model Validation (Priority: Medium)
-**Problem:** Replicated on two Qwen models, but no cross-family validation
+**Problem:** Replicated across seeds on two Qwen models, but no cross-family validation
 **Impact:** Results may not generalize
 **Solution:** Run on Llama, Mistral
 

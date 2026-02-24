@@ -12,7 +12,7 @@ Key analyses:
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 import numpy as np
@@ -140,7 +140,7 @@ class PredictiveValidityAnalyzer:
         buckets = data["buckets"]
 
         # Define feature sets
-        confound_features = ["log_frequency", "norm"]  # Can't include type directly
+        confound_features = [name for name in feature_names if name.startswith("conf_")]
         geometry_features = ["cond", "pr", "logdet", "spread_q", "anisotropy", "severity"]
         all_features = confound_features + geometry_features
 
@@ -151,7 +151,7 @@ class PredictiveValidityAnalyzer:
 
         # Model comparisons with bootstrap CI
         baseline_model = self._evaluate_model(
-            X[:, confound_idx], y, "baseline (freq+norm)",
+            X[:, confound_idx], y, "baseline (confounds)",
             [feature_names[i] for i in confound_idx]
         )
 
@@ -207,10 +207,36 @@ class PredictiveValidityAnalyzer:
         stress_test_results: dict[int, float],
     ) -> dict:
         """Build feature matrix from diagnostic results."""
-        feature_names = [
-            "log_frequency", "norm",  # Confounds
-            "cond", "pr", "logdet", "spread_q", "anisotropy", "severity"  # Geometry
+        token_type_values = sorted({
+            str(result.token_info.token_type.name).lower()
+            for result in diagnostic_results
+            if result.token_info.token_type is not None
+        })
+        tier_values = sorted({
+            str(result.token_info.frequency_tier.name).lower()
+            for result in diagnostic_results
+            if result.token_info.frequency_tier is not None
+        })
+
+        confound_feature_names = [
+            "conf_log_frequency",
+            "conf_norm",
+            "conf_token_len",
+            "conf_is_ascii",
+            "conf_has_digit",
         ]
+        confound_feature_names.extend([f"conf_type_{value}" for value in token_type_values])
+        confound_feature_names.extend([f"conf_tier_{value}" for value in tier_values])
+
+        geometry_feature_names = [
+            "cond",
+            "pr",
+            "logdet",
+            "spread_q",
+            "anisotropy",
+            "severity",
+        ]
+        feature_names = confound_feature_names + geometry_feature_names
 
         X = []
         y = []
@@ -222,16 +248,36 @@ class PredictiveValidityAnalyzer:
 
             failure_rate = stress_test_results[result.token_id]
 
-            features = [
-                np.log(result.token_info.frequency + 1),  # log_frequency
-                result.token_info.norm,  # norm
-                result.stage2.cond,  # cond
-                result.stage2.pr,  # pr
-                result.stage2.logdet,  # logdet
-                result.stage1.spread_q,  # spread_q
-                result.stage2.anisotropy,  # anisotropy
-                result.severity,  # severity (composite)
+            token_str = str(result.token_info.token_str or "")
+            token_type_name = str(result.token_info.token_type.name).lower()
+            tier_name = str(result.token_info.frequency_tier.name).lower()
+
+            freq = max(float(result.token_info.frequency), 0.0)
+            conf_features = [
+                np.log1p(freq),
+                float(result.token_info.norm),
+                float(len(token_str)),
+                float(token_str.isascii()),
+                float(any(char.isdigit() for char in token_str)),
             ]
+            conf_features.extend([
+                1.0 if token_type_name == value else 0.0
+                for value in token_type_values
+            ])
+            conf_features.extend([
+                1.0 if tier_name == value else 0.0
+                for value in tier_values
+            ])
+
+            geometry_features = [
+                float(result.stage2.cond),
+                float(result.stage2.pr),
+                float(result.stage2.logdet),
+                float(result.stage1.spread_q),
+                float(result.stage2.anisotropy),
+                float(result.severity),
+            ]
+            features = conf_features + geometry_features
 
             X.append(features)
             y.append(1 if failure_rate > self.failure_threshold else 0)
@@ -248,6 +294,39 @@ class PredictiveValidityAnalyzer:
             "n_samples": len(X),
         }
 
+    def _cross_val_predict_proba(
+        self,
+        X_scaled: NDArray,
+        y: NDArray,
+        model,
+    ) -> NDArray:
+        """Return cross-validated probabilities when class support allows it."""
+        from sklearn.model_selection import StratifiedKFold, cross_val_predict
+
+        class_counts = np.bincount(y.astype(int))
+        if class_counts.size < 2:
+            model.fit(X_scaled, y)
+            return model.predict_proba(X_scaled)[:, 1]
+
+        min_class_count = int(class_counts.min())
+        n_splits = min(5, min_class_count)
+        if n_splits < 2:
+            model.fit(X_scaled, y)
+            return model.predict_proba(X_scaled)[:, 1]
+
+        cv = StratifiedKFold(
+            n_splits=n_splits,
+            shuffle=True,
+            random_state=self.random_state,
+        )
+        return cross_val_predict(
+            model,
+            X_scaled,
+            y,
+            cv=cv,
+            method="predict_proba",
+        )[:, 1]
+
     def _evaluate_model(
         self,
         X: NDArray,
@@ -260,7 +339,6 @@ class PredictiveValidityAnalyzer:
             from sklearn.linear_model import LogisticRegression
             from sklearn.preprocessing import StandardScaler
             from sklearn.metrics import roc_auc_score, average_precision_score
-            from sklearn.model_selection import cross_val_predict
 
             # Handle edge cases
             if len(np.unique(y)) < 2:
@@ -278,9 +356,7 @@ class PredictiveValidityAnalyzer:
             model = LogisticRegression(max_iter=1000, random_state=self.random_state)
 
             try:
-                y_pred = cross_val_predict(
-                    model, X_scaled, y, cv=5, method='predict_proba'
-                )[:, 1]
+                y_pred = self._cross_val_predict_proba(X_scaled, y, model)
             except:
                 # Fall back to simple fit if CV fails
                 model.fit(X_scaled, y)
@@ -371,7 +447,6 @@ class PredictiveValidityAnalyzer:
             from sklearn.linear_model import LogisticRegression
             from sklearn.preprocessing import StandardScaler
             from sklearn.metrics import roc_auc_score
-            from sklearn.model_selection import cross_val_predict
 
             if len(np.unique(y)) < 2:
                 return []
@@ -387,9 +462,7 @@ class PredictiveValidityAnalyzer:
                 model = LogisticRegression(max_iter=1000, random_state=self.random_state)
 
                 try:
-                    y_pred = cross_val_predict(
-                        model, X_scaled, y, cv=5, method='predict_proba'
-                    )[:, 1]
+                    y_pred = self._cross_val_predict_proba(X_scaled, y, model)
                     auc_without = roc_auc_score(y, y_pred)
                 except:
                     model.fit(X_scaled, y)
@@ -453,8 +526,7 @@ class PredictiveValidityAnalyzer:
                     X_scaled = scaler.fit_transform(X_bucket)
 
                     model = LogisticRegression(max_iter=1000, random_state=self.random_state)
-                    model.fit(X_scaled, y_bucket)
-                    y_pred = model.predict_proba(X_scaled)[:, 1]
+                    y_pred = self._cross_val_predict_proba(X_scaled, y_bucket, model)
 
                     auc = roc_auc_score(y_bucket, y_pred)
                     pr_auc = average_precision_score(y_bucket, y_pred)
@@ -530,7 +602,7 @@ def format_validity_report(result: PredictiveValidityResult) -> str:
         "",
         "MODEL COMPARISON",
         "-" * 40,
-        f"  Baseline (freq+norm):  AUC = {result.baseline_model.auc:.3f} "
+        f"  Baseline (confounds): AUC = {result.baseline_model.auc:.3f} "
         f"[{result.baseline_model.auc_ci_low:.3f}, {result.baseline_model.auc_ci_high:.3f}]",
         f"  Geometry only:         AUC = {result.geometry_model.auc:.3f} "
         f"[{result.geometry_model.auc_ci_low:.3f}, {result.geometry_model.auc_ci_high:.3f}]",

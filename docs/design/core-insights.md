@@ -52,11 +52,11 @@ Initial concern: Maybe severity just correlates with token frequency or type.
 - Embedding norm
 - Simple density (mean kNN distance)
 
-Latest runs:
-- Qwen2.5-7B: baseline AUC 0.732 vs geometry AUC 0.679 (delta -0.054)
-- Qwen2.5-Coder-7B: baseline AUC 0.489 vs geometry AUC 0.195 (delta -0.294)
+Latest multi-seed sweep (2 seeds/model, 120 tokens/run, logprob-choice scoring):
+- qwen2_5_coder_7b: delta mean -0.005 (1/2 runs positive)
+- qwen2_5_7b: delta mean -0.111 (1/2 runs positive)
 
-**Interpretation:** Pipeline and stress tests execute end-to-end with real labels, but the predictive claim ("geometry adds value beyond confounds") is not supported yet.
+**Interpretation:** Pipeline and stress tests execute end-to-end with real labels, but geometry signal is currently unstable and not stronger than confound baselines in aggregate.
 
 ## 4. Mechanistic vs Behavioral Evidence
 
@@ -75,4 +75,6 @@ Behavioral evidence requires running actual model inference with repaired embedd
 
 The stress suite now includes forced-token minimal-pair prompts with bucket-matched controls, which substantially improves token-specific attribution.
 
-**Remaining gap:** Evaluation is still exact-match generation based; adding forced-choice/logprob-margin scoring would reduce formatting noise and improve robustness.
+The suite now supports forced-choice logprob-margin scoring (`logprob_choice`) in addition to generation checks.
+
+**Remaining gap:** margin thresholds and calibration need broader cross-model tuning to reduce variance and improve stability.

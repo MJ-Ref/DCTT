@@ -118,6 +118,45 @@ def load_results(output_dir: Path) -> dict:
     if predictive_runs:
         results["predictive_validity_runs"] = predictive_runs
 
+    # Load latest predictive-validity sweep aggregate if available
+    sweep_root = output_dir / "sweeps" / "predictive_validity"
+    if sweep_root.exists():
+        sweep_candidates = sorted(
+            sweep_root.glob("*/sweep_results.json"),
+            key=lambda path: path.stat().st_mtime,
+            reverse=True,
+        )
+        best_sweep_payload = None
+        best_sweep_path = None
+        best_score = None
+        for sweep_path in sweep_candidates:
+            payload = load_json_safe(sweep_path)
+            if payload is None:
+                continue
+            aggregate = payload.get("aggregate", {})
+            if not aggregate:
+                continue
+
+            total_runs = int(
+                sum(int(row.get("n_runs", 0)) for row in aggregate.values())
+            )
+            n_models = int(len(aggregate))
+            mtime = float(sweep_path.stat().st_mtime)
+            score = (total_runs, n_models, mtime)
+            if best_score is None or score > best_score:
+                best_score = score
+                best_sweep_payload = payload
+                best_sweep_path = sweep_path
+
+        if best_sweep_payload is not None and best_sweep_path is not None:
+            results["predictive_validity_sweep"] = best_sweep_payload
+            results_paths["predictive_validity_sweep"] = str(best_sweep_path)
+            logger.info(
+                "Loaded predictive validity sweep from %s (score=%s)",
+                best_sweep_path,
+                best_score,
+            )
+
     return results
 
 
@@ -146,7 +185,7 @@ def figure1_predictive_validity(results: dict, output_dir: Path) -> None:
     use_simulated = pv.get("config", {}).get("use_simulated_failures", False)
 
     # Extract data
-    models = ["Baseline\n(freq+type)", "Geometry\nOnly", "Full\nModel"]
+    models = ["Baseline\n(confounds)", "Geometry\nOnly", "Full\nModel"]
     aucs = [
         model_comp.get("baseline", {}).get("auc", 0),
         model_comp.get("geometry", {}).get("auc", 0),
@@ -210,6 +249,73 @@ def figure1_predictive_validity(results: dict, output_dir: Path) -> None:
 
 def figure4_model_replication(results: dict, output_dir: Path) -> None:
     """Figure 4: Multi-model predictive validity replication."""
+    sweep = results.get("predictive_validity_sweep")
+    if sweep:
+        aggregate = sweep.get("aggregate", {})
+        if not aggregate:
+            logger.warning("Predictive sweep payload missing aggregate data")
+            return
+
+        model_labels = sorted(aggregate.keys())
+        baseline_auc = [float(aggregate[m].get("baseline_auc_mean", 0.0)) for m in model_labels]
+        geometry_auc = [float(aggregate[m].get("geometry_auc_mean", 0.0)) for m in model_labels]
+        baseline_std = [float(aggregate[m].get("baseline_auc_std", 0.0)) for m in model_labels]
+        geometry_std = [float(aggregate[m].get("geometry_auc_std", 0.0)) for m in model_labels]
+        n_runs = [int(aggregate[m].get("n_runs", 0)) for m in model_labels]
+
+        x = np.arange(len(model_labels))
+        width = 0.35
+        fig, ax = plt.subplots(figsize=(max(6, len(model_labels) * 2.4), 4.4))
+
+        ax.bar(
+            x - width / 2,
+            baseline_auc,
+            width,
+            yerr=baseline_std,
+            capsize=4,
+            color="#95a5a6",
+            edgecolor="black",
+            linewidth=0.5,
+            label="Baseline AUC (mean±sd)",
+        )
+        ax.bar(
+            x + width / 2,
+            geometry_auc,
+            width,
+            yerr=geometry_std,
+            capsize=4,
+            color="#3498db",
+            edgecolor="black",
+            linewidth=0.5,
+            label="Geometry AUC (mean±sd)",
+        )
+
+        for idx, run_count in enumerate(n_runs):
+            ax.text(
+                x[idx],
+                min(0.98, max(baseline_auc[idx], geometry_auc[idx]) + 0.04),
+                f"n={run_count}",
+                ha="center",
+                va="bottom",
+                fontsize=8,
+                color="#2c3e50",
+            )
+
+        ax.set_xticks(x)
+        ax.set_xticklabels([m[:20] for m in model_labels], rotation=15, ha="right")
+        ax.set_ylabel("AUC-ROC")
+        ax.set_ylim(0.2, 1.0)
+        ax.set_title("Model Replication: Predictive Validity Sweep Means")
+        ax.legend(loc="lower right")
+        ax.axhline(0.5, linestyle="--", color="gray", alpha=0.5)
+
+        plt.tight_layout()
+        fig.savefig(output_dir / "fig4_model_replication.pdf")
+        fig.savefig(output_dir / "fig4_model_replication.png")
+        plt.close()
+        logger.info("Saved Figure 4: Model replication (sweep aggregate)")
+        return
+
     runs = _latest_predictive_runs_by_model(results)
     if not runs:
         logger.warning("No predictive-validity runs found for replication figure")
@@ -412,7 +518,7 @@ def table1_main_results(results: dict, output_dir: Path) -> None:
         mc = pv.get("model_comparison", {})
         use_simulated = pv.get("config", {}).get("use_simulated_failures", False)
         lines.append(f"  Label source:          {'SIMULATED (smoke-test only)' if use_simulated else 'REAL stress tests'}")
-        lines.append(f"  Baseline (freq+type):  AUC = {mc.get('baseline', {}).get('auc', 0):.3f}")
+        lines.append(f"  Baseline (confounds):  AUC = {mc.get('baseline', {}).get('auc', 0):.3f}")
         lines.append(f"  Geometry only:         AUC = {mc.get('geometry', {}).get('auc', 0):.3f}")
         lines.append(f"  Full model:            AUC = {mc.get('full', {}).get('auc', 0):.3f}")
         improvement = mc.get('geometry', {}).get('auc', 0) - mc.get('baseline', {}).get('auc', 0)
@@ -556,6 +662,72 @@ def table2_flagged_tokens(results: dict, output_dir: Path) -> None:
 
 def table3_model_replication(results: dict, output_dir: Path) -> None:
     """Table 3: Latest predictive-validity results by model."""
+    sweep = results.get("predictive_validity_sweep")
+    if sweep:
+        aggregate = sweep.get("aggregate", {})
+        records = sweep.get("records", [])
+        if aggregate:
+            lines = []
+            lines.append("=" * 112)
+            lines.append("TABLE 3: Predictive Validity Replication (Sweep Aggregate)")
+            lines.append("=" * 112)
+            lines.append("")
+            lines.append(
+                f"{'Model':<30}{'Runs':<8}{'Baseline(mean±sd)':<24}{'Geometry(mean±sd)':<24}{'Delta(mean±sd)':<20}{'PosDelta':<8}"
+            )
+            lines.append("-" * 112)
+            for model_name in sorted(aggregate.keys()):
+                row = aggregate[model_name]
+                baseline_cell = (
+                    f"{float(row.get('baseline_auc_mean', 0.0)):.3f}"
+                    f"±{float(row.get('baseline_auc_std', 0.0)):.3f}"
+                )
+                geometry_cell = (
+                    f"{float(row.get('geometry_auc_mean', 0.0)):.3f}"
+                    f"±{float(row.get('geometry_auc_std', 0.0)):.3f}"
+                )
+                delta_cell = (
+                    f"{float(row.get('delta_mean', 0.0)):+.3f}"
+                    f"±{float(row.get('delta_std', 0.0)):.3f}"
+                )
+                lines.append(
+                    f"{model_name:<30}"
+                    f"{int(row.get('n_runs', 0)):<8d}"
+                    f"{baseline_cell:<24}"
+                    f"{geometry_cell:<24}"
+                    f"{delta_cell:<20}"
+                    f"{int(row.get('n_positive_delta', 0))}/{int(row.get('n_runs', 0)):<8d}"
+                )
+
+            if records:
+                lines.append("")
+                lines.append("Per-run:")
+                lines.append("-" * 112)
+                lines.append(
+                    f"{'Model':<30}{'Seed':<8}{'Baseline':<12}{'Geometry':<12}{'Full':<12}{'Delta':<12}{'N':<8}"
+                )
+                for row in records:
+                    lines.append(
+                        f"{str(row.get('model_override', 'unknown')):<30}{int(row.get('seed', 0)):<8d}"
+                        f"{float(row.get('baseline_auc', 0.0)):<12.3f}"
+                        f"{float(row.get('geometry_auc', 0.0)):<12.3f}"
+                        f"{float(row.get('full_auc', 0.0)):<12.3f}"
+                        f"{float(row.get('delta_geometry_minus_baseline', 0.0)):<12.3f}"
+                        f"{int(row.get('n_tokens', 0)):<8d}"
+                    )
+
+            lines.append("")
+            lines.append("Note: Aggregate rows are preferred for publication claims.")
+            lines.append("=" * 112)
+
+            table_text = "\n".join(lines)
+            with (output_dir / "table3_model_replication.txt").open("w") as f:
+                f.write(table_text)
+
+            print(table_text)
+            logger.info("Saved Table 3: Model replication (sweep aggregate)")
+            return
+
     runs = _latest_predictive_runs_by_model(results)
     if not runs:
         logger.warning("No predictive-validity runs found for Table 3")

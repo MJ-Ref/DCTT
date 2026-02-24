@@ -30,9 +30,9 @@ What DCTT can and cannot claim based on current evidence.
 ### 1. "Geometry metrics predict token-level failures beyond frequency/type confounds"
 
 **Why not:**
-- Real-label run on Qwen2.5-7B: baseline AUC 0.732, geometry AUC 0.679 (delta -0.054)
-- Real-label run on Qwen2.5-Coder-7B: baseline AUC 0.489, geometry AUC 0.195 (delta -0.294)
-- Geometry-only does not beat baseline in either run
+- Multi-seed real-label sweep on qwen2_5_coder_7b: delta mean -0.005 (1/2 runs positive)
+- Multi-seed real-label sweep on qwen2_5_7b: delta mean -0.111 (1/2 runs positive)
+- Geometry-only performance is unstable and negative on average
 
 **What's needed:**
 - Larger real-label sample sizes and stress-test budgets

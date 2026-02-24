@@ -97,3 +97,84 @@ def test_forced_token_payload_handles_whitespace() -> None:
     payload, escaped_mode = stress_test._token_payload(" \n")
     assert escaped_mode is True
     assert "\\" in payload
+
+
+def test_forced_token_minimal_pair_logprob_scoring_path() -> None:
+    """Logprob-choice mode should use score_options when available."""
+    stress_test = ForcedTokenMinimalPairTest(
+        control_map={11: (22, "CTRL")},
+        scoring_mode="logprob_choice",
+        min_logprob_margin=0.05,
+    )
+
+    class ChoiceModel:
+        def __call__(self, prompt: str) -> str:
+            _ = prompt
+            return "unused"
+
+        def score_options(self, prompt: str, options: list[str]) -> dict:
+            expected = "CTRL" if "CTRL" in prompt else "GOOD"
+            scores = {
+                option: (0.0 if option == expected else -0.4)
+                for option in options
+            }
+            ranked = sorted(scores.items(), key=lambda item: item[1], reverse=True)
+            return {
+                "best_option": ranked[0][0],
+                "best_score": ranked[0][1],
+                "margin": ranked[0][1] - ranked[1][1],
+                "scores": scores,
+            }
+
+    result = stress_test.run_single(
+        token_id=11,
+        token_str="GOOD",
+        model_fn=ChoiceModel(),
+        n_cases=2,
+    )
+
+    assert result.failure_rate == 0.0
+    assert result.details["control_failure_rate"] == 0.0
+    assert result.details["failure_gap"] == 0.0
+    assert result.details["scoring_mode"] == "logprob_choice"
+    assert result.details["cases"][0]["scoring_mode"] == "logprob_choice"
+    assert result.details["cases"][0]["target_margin"] is not None
+
+
+def test_forced_token_minimal_pair_logprob_margin_enforced() -> None:
+    """Cases fail in logprob mode when margin is below threshold."""
+    stress_test = ForcedTokenMinimalPairTest(
+        control_map={11: (22, "CTRL")},
+        scoring_mode="logprob_choice",
+        min_logprob_margin=0.5,
+    )
+
+    class LowMarginModel:
+        def __call__(self, prompt: str) -> str:
+            _ = prompt
+            return "unused"
+
+        def score_options(self, prompt: str, options: list[str]) -> dict:
+            expected = "CTRL" if "CTRL" in prompt else "GOOD"
+            scores = {
+                option: (0.0 if option == expected else -0.1)
+                for option in options
+            }
+            ranked = sorted(scores.items(), key=lambda item: item[1], reverse=True)
+            return {
+                "best_option": ranked[0][0],
+                "best_score": ranked[0][1],
+                "margin": ranked[0][1] - ranked[1][1],
+                "scores": scores,
+            }
+
+    result = stress_test.run_single(
+        token_id=11,
+        token_str="GOOD",
+        model_fn=LowMarginModel(),
+        n_cases=3,
+    )
+
+    assert result.failure_rate == 1.0
+    assert result.details["control_failure_rate"] == 1.0
+    assert result.details["failure_gap"] == 0.0

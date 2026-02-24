@@ -155,41 +155,187 @@ def simulate_stress_test_failures(
     return failures
 
 
-def _create_model_fn(
-    model: Any,
-    tokenizer: Any,
-    default_max_new_tokens: int,
-) -> Any:
-    """Create a callable prompt -> completion for stress test runner."""
-    import torch
+class _StressModelAdapter:
+    """Adapter exposing generation and candidate-scoring helpers for stress tests."""
 
-    def model_fn(prompt: str, max_new_tokens: int | None = None) -> str:
-        inputs = tokenizer(prompt, return_tensors="pt")
+    def __init__(
+        self,
+        model: Any,
+        tokenizer: Any,
+        default_max_new_tokens: int,
+    ) -> None:
+        import torch
 
-        if hasattr(model, "device") and str(model.device) != "cpu":
-            inputs = {k: v.to(model.device) for k, v in inputs.items()}
+        self.model = model
+        self.tokenizer = tokenizer
+        self.default_max_new_tokens = int(default_max_new_tokens)
+        self.torch = torch
+        self.device = getattr(model, "device", torch.device("cpu"))
+
+    def _on_device(self, tensor):
+        if str(self.device) == "cpu":
+            return tensor
+        return tensor.to(self.device)
+
+    def __call__(self, prompt: str, max_new_tokens: int | None = None) -> str:
+        inputs = self.tokenizer(prompt, return_tensors="pt")
+        if str(self.device) != "cpu":
+            inputs = {k: v.to(self.device) for k, v in inputs.items()}
 
         generate_kwargs = {
             "max_new_tokens": (
                 int(max_new_tokens)
                 if max_new_tokens is not None
-                else int(default_max_new_tokens)
+                else self.default_max_new_tokens
             ),
             "do_sample": False,
         }
-        pad_token_id = tokenizer.pad_token_id
+        pad_token_id = self.tokenizer.pad_token_id
         if pad_token_id is None:
-            pad_token_id = tokenizer.eos_token_id
+            pad_token_id = self.tokenizer.eos_token_id
         if pad_token_id is not None:
             generate_kwargs["pad_token_id"] = pad_token_id
 
-        with torch.no_grad():
-            outputs = model.generate(**inputs, **generate_kwargs)
+        with self.torch.no_grad():
+            outputs = self.model.generate(**inputs, **generate_kwargs)
 
         prompt_len = int(inputs["input_ids"].shape[1])
-        return tokenizer.decode(outputs[0][prompt_len:], skip_special_tokens=True)
+        return self.tokenizer.decode(outputs[0][prompt_len:], skip_special_tokens=True)
 
-    return model_fn
+    def score_options(self, prompt: str, options: list[str]) -> dict[str, Any]:
+        """Score candidate continuations by mean token log-probability."""
+        prompt_ids = self.tokenizer(
+            prompt,
+            add_special_tokens=False,
+        )["input_ids"]
+        if not prompt_ids:
+            fallback = self.tokenizer.bos_token_id
+            if fallback is None:
+                fallback = self.tokenizer.eos_token_id
+            if fallback is not None:
+                prompt_ids = [int(fallback)]
+
+        scores: dict[str, float] = {}
+        for option in options:
+            option_ids = self.tokenizer(
+                option,
+                add_special_tokens=False,
+            )["input_ids"]
+            if not option_ids:
+                scores[str(option)] = float("-inf")
+                continue
+
+            full_ids = list(prompt_ids) + list(option_ids)
+            input_ids = self.torch.tensor([full_ids], dtype=self.torch.long)
+            input_ids = self._on_device(input_ids)
+
+            with self.torch.no_grad():
+                logits = self.model(input_ids=input_ids).logits[0]
+                log_probs = self.torch.log_softmax(logits, dim=-1)
+
+            start = len(prompt_ids)
+            positions = list(range(start, len(full_ids)))
+            if not positions:
+                scores[str(option)] = float("-inf")
+                continue
+
+            prev_positions = self.torch.tensor(
+                [pos - 1 for pos in positions],
+                dtype=self.torch.long,
+                device=log_probs.device,
+            )
+            next_tokens = self.torch.tensor(
+                [full_ids[pos] for pos in positions],
+                dtype=self.torch.long,
+                device=log_probs.device,
+            )
+            token_log_probs = log_probs[prev_positions, next_tokens]
+            if token_log_probs.numel() == 0:
+                scores[str(option)] = float("-inf")
+            else:
+                scores[str(option)] = float(token_log_probs.mean().item())
+
+        ranked = sorted(scores.items(), key=lambda item: item[1], reverse=True)
+        best_option = ranked[0][0] if ranked else ""
+        best_score = float(ranked[0][1]) if ranked else float("-inf")
+        second_score = float(ranked[1][1]) if len(ranked) > 1 else float("-inf")
+        margin = (
+            best_score - second_score
+            if len(ranked) > 1
+            else float("inf")
+        )
+
+        return {
+            "best_option": best_option,
+            "best_score": best_score,
+            "margin": float(margin),
+            "scores": {key: float(value) for key, value in scores.items()},
+        }
+
+
+def _create_model_fn(
+    model: Any,
+    tokenizer: Any,
+    default_max_new_tokens: int,
+) -> Any:
+    """Create model adapter for stress tests."""
+    return _StressModelAdapter(
+        model=model,
+        tokenizer=tokenizer,
+        default_max_new_tokens=default_max_new_tokens,
+    )
+
+
+def _resolve_runtime_device(
+    requested_device: str,
+    torch_module: Any,
+) -> str:
+    """Resolve runtime device with availability-aware fallback."""
+    requested = str(requested_device).strip().lower()
+    has_cuda = bool(torch_module.cuda.is_available())
+    backends = getattr(torch_module, "backends", None)
+    mps_backend = getattr(backends, "mps", None) if backends is not None else None
+    has_mps = bool(mps_backend is not None and mps_backend.is_available())
+
+    if requested == "auto":
+        if has_mps:
+            return "mps"
+        if has_cuda:
+            return "cuda"
+        return "cpu"
+
+    if requested == "mps":
+        if has_mps:
+            return "mps"
+        fallback = "cuda" if has_cuda else "cpu"
+        logger.warning(
+            "Requested device 'mps' unavailable; falling back to '%s'.",
+            fallback,
+        )
+        return fallback
+
+    if requested == "cuda":
+        if has_cuda:
+            return "cuda"
+        fallback = "mps" if has_mps else "cpu"
+        logger.warning(
+            "Requested device 'cuda' unavailable; falling back to '%s'.",
+            fallback,
+        )
+        return fallback
+
+    if requested == "cpu":
+        return "cpu"
+
+    logger.warning(
+        "Unknown compute.device '%s'; falling back to auto selection.",
+        requested_device,
+    )
+    if has_mps:
+        return "mps"
+    if has_cuda:
+        return "cuda"
+    return "cpu"
 
 
 def run_stress_tests(
@@ -209,11 +355,21 @@ def run_stress_tests(
         diagnostic_results,
         seed=int(cfg.seed),
     )
-    tests = [ForcedTokenMinimalPairTest(control_map=control_map, seed=int(cfg.seed))]
 
     stress_cfg = cfg.get("stress_test", cfg.get("stress_tests", {}))
     n_cases = int(stress_cfg.get("n_prompts", stress_cfg.get("n_samples", 10)))
     max_new_tokens = int(stress_cfg.get("max_new_tokens", 32))
+    scoring_mode = str(stress_cfg.get("scoring_mode", "generation"))
+    min_logprob_margin = float(stress_cfg.get("min_logprob_margin", 0.0))
+
+    tests = [
+        ForcedTokenMinimalPairTest(
+            control_map=control_map,
+            seed=int(cfg.seed),
+            scoring_mode=scoring_mode,
+            min_logprob_margin=min_logprob_margin,
+        )
+    ]
 
     runner = StressTestRunner(
         tests=tests,
@@ -248,15 +404,39 @@ def run_stress_tests(
         float(item.details.get("failure_gap", 0.0))
         for item in pair_results
     ]
+    target_margins = [
+        float(case["target_margin"])
+        for item in pair_results
+        for case in item.details.get("cases", [])
+        if (
+            case.get("target_margin") is not None
+            and np.isfinite(float(case["target_margin"]))
+        )
+    ]
+    control_margins = [
+        float(case["control_margin"])
+        for item in pair_results
+        for case in item.details.get("cases", [])
+        if (
+            case.get("control_margin") is not None
+            and np.isfinite(float(case["control_margin"]))
+        )
+    ]
 
     summary = {
         "mode": "forced_token_minimal_pair",
+        "scoring_mode": scoring_mode,
+        "min_logprob_margin": min_logprob_margin,
         "n_tokens": len(pair_results),
         "n_cases_per_token": n_cases,
         "mean_target_failure_rate": float(np.mean(target_rates)) if target_rates else 0.0,
         "mean_control_failure_rate": float(np.mean(control_rates)) if control_rates else 0.0,
         "mean_failure_gap": float(np.mean(gaps)) if gaps else 0.0,
         "pct_positive_gap": float(np.mean([g > 0 for g in gaps])) if gaps else 0.0,
+        "pct_negative_gap": float(np.mean([g < 0 for g in gaps])) if gaps else 0.0,
+        "pct_zero_gap": float(np.mean([g == 0 for g in gaps])) if gaps else 0.0,
+        "mean_target_margin": float(np.mean(target_margins)) if target_margins else 0.0,
+        "mean_control_margin": float(np.mean(control_margins)) if control_margins else 0.0,
     }
     return failure_rates, summary
 
@@ -379,15 +559,24 @@ def main(cfg: DictConfig) -> None:
             "use_simulated_failures",
             False,
         )
+        stress_cfg = cfg.get("stress_test", cfg.get("stress_tests", {}))
+        stress_scoring_mode = str(stress_cfg.get("scoring_mode", "generation"))
+        min_logprob_margin = float(stress_cfg.get("min_logprob_margin", 0.0))
 
         minimal_pair_summary: dict[str, Any] = {
             "mode": "simulated",
+            "scoring_mode": stress_scoring_mode,
+            "min_logprob_margin": min_logprob_margin,
             "n_tokens": len(diagnostic_results),
             "n_cases_per_token": 0,
             "mean_target_failure_rate": 0.0,
             "mean_control_failure_rate": 0.0,
             "mean_failure_gap": 0.0,
             "pct_positive_gap": 0.0,
+            "pct_negative_gap": 0.0,
+            "pct_zero_gap": 0.0,
+            "mean_target_margin": 0.0,
+            "mean_control_margin": 0.0,
         }
 
         if use_simulated:
@@ -401,14 +590,7 @@ def main(cfg: DictConfig) -> None:
             from transformers import AutoModelForCausalLM
             import torch
 
-            device = cfg.compute.device
-            if device == "auto":
-                if torch.backends.mps.is_available():
-                    device = "mps"
-                elif torch.cuda.is_available():
-                    device = "cuda"
-                else:
-                    device = "cpu"
+            device = _resolve_runtime_device(str(cfg.compute.device), torch)
 
             torch_dtype = getattr(torch, str(cfg.model.torch_dtype), None)
             if torch_dtype is None:
@@ -539,6 +721,8 @@ def main(cfg: DictConfig) -> None:
                 "n_bootstrap": cfg.get("predictive_validity", {}).get("n_bootstrap", 100),
                 "use_simulated_failures": use_simulated,
                 "stress_test_design": "forced_token_minimal_pair" if not use_simulated else "simulated",
+                "stress_test_scoring_mode": stress_scoring_mode,
+                "min_logprob_margin": min_logprob_margin,
             },
         }
 

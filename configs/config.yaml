@@ -42,6 +42,8 @@ stress_test:
   n_tokens: 50  # Number of high/low severity tokens to test
   n_prompts: 5  # Prompts per token
   max_new_tokens: 32  # Generation cap for stress-test responses
+  scoring_mode: "logprob_choice"  # generation | logprob_choice
+  min_logprob_margin: 0.0  # Required best-vs-second margin in logprob choice mode
   use_mock: false  # Use mock model for testing
 
 # Repair validation settings
