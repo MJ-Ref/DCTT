@@ -129,7 +129,10 @@ def main(cfg: DictConfig) -> None:
         distances = distances[0]
 
         # Compute Stage 1
-        stage1 = compute_stage1_metrics(token_id, distances)
+        stage1 = compute_stage1_metrics(
+            distances=distances,
+            token_id=token_id,
+        )
 
         # Compute Stage 2
         stage2 = compute_stage2_metrics(
@@ -202,16 +205,21 @@ def main(cfg: DictConfig) -> None:
         embedding = embeddings[token_id]
 
         # Get neighbors
-        query_vec = embedding.reshape(1, -1)
-        neighbors, _ = index.query(query_vec, k=k, exclude_self=True)
+        neighbors, _ = index.query_single(
+            embedding,
+            k=k,
+            exclude_self=True,
+            self_index=token_id,
+        )
 
         # Repair
         result = optimizer.repair(
             embedding=embedding,
-            neighbors=neighbors[0],
+            neighbors=neighbors,
             all_embeddings=embeddings,
             index=index,
             k=k,
+            token_id=token_id,
         )
         result.token_id = token_id
 

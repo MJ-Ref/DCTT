@@ -42,17 +42,21 @@ High-severity tokens tend to cluster together. A token with bad geometry usually
 
 **Implication:** You can't escape a bad neighborhood by moving slightly - you need to move into an entirely different region, or move the whole neighborhood together.
 
-## 3. Geometry Predicts Beyond Confounds
+## 3. Real-Label Predictive Validity Is Currently Weak
 
 Initial concern: Maybe severity just correlates with token frequency or type.
 
-**Finding:** Geometry metrics (cond, PR, logdet) predict failures even after controlling for:
+**Current finding:** In real-label runs, geometry-only models underperform confound baselines after controlling for:
 - Log frequency
 - Token type (code, punctuation, etc.)
 - Embedding norm
 - Simple density (mean kNN distance)
 
-AUC improvement: 0.80 (geometry) vs 0.53 (baseline confounds only)
+Latest runs:
+- Qwen2.5-7B: baseline AUC 0.732 vs geometry AUC 0.679 (delta -0.054)
+- Qwen2.5-Coder-7B: baseline AUC 0.489 vs geometry AUC 0.195 (delta -0.294)
+
+**Interpretation:** Pipeline and stress tests execute end-to-end with real labels, but the predictive claim ("geometry adds value beyond confounds") is not supported yet.
 
 ## 4. Mechanistic vs Behavioral Evidence
 
@@ -67,8 +71,8 @@ The causal experiment shows treatment (cluster repair) reduces condition number 
 
 Behavioral evidence requires running actual model inference with repaired embeddings - not yet implemented.
 
-## 5. Stress Tests Don't Isolate Tokens
+## 5. Stress Tests Now Isolate Tokens Better, But Scoring Can Improve
 
-Current stress test prompts don't force the target token to be the cause of failure. A prompt might fail for reasons unrelated to the specific token being tested.
+The stress suite now includes forced-token minimal-pair prompts with bucket-matched controls, which substantially improves token-specific attribution.
 
-**Needed:** Forced-token decoding, minimal pairs, or logprob margins on required tokens.
+**Remaining gap:** Evaluation is still exact-match generation based; adding forced-choice/logprob-margin scoring would reduce formatting noise and improve robustness.

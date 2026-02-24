@@ -241,6 +241,40 @@ class USearchIndex(VectorIndex):
             Tuple of (indices, distances), each of shape (k,).
         """
         query_2d = query_vector.reshape(1, -1)
+
+        # If caller provides a known token id, exclude that id explicitly.
+        # This handles perturbed vectors where distance-based self filtering
+        # may fail because the query is no longer an exact index vector.
+        if exclude_self and self_index is not None:
+            search_k = min(self._n_vectors, k + 1)
+            indices, distances = self.query(query_2d, search_k, exclude_self=False)
+
+            valid_mask = indices[0] != self_index
+            filtered_indices = indices[0][valid_mask][:k]
+            filtered_distances = distances[0][valid_mask][:k]
+
+            n_valid = len(filtered_indices)
+            if n_valid == 0:
+                indices, distances = self.query(query_2d, k, exclude_self=exclude_self)
+                return indices[0], distances[0]
+
+            if n_valid < k:
+                pad_count = k - n_valid
+                filtered_indices = np.pad(
+                    filtered_indices,
+                    (0, pad_count),
+                    mode="constant",
+                    constant_values=filtered_indices[-1],
+                )
+                filtered_distances = np.pad(
+                    filtered_distances,
+                    (0, pad_count),
+                    mode="constant",
+                    constant_values=filtered_distances[-1],
+                )
+
+            return filtered_indices, filtered_distances
+
         indices, distances = self.query(query_2d, k, exclude_self=exclude_self)
         return indices[0], distances[0]
 

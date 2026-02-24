@@ -13,6 +13,7 @@ Usage:
 
 from __future__ import annotations
 
+import heapq
 import json
 import logging
 from pathlib import Path
@@ -42,6 +43,16 @@ plt.rcParams.update({
 def load_results(output_dir: Path) -> dict:
     """Load all experiment results."""
     results = {}
+    results_paths = {}
+    predictive_runs: list[dict] = []
+
+    def load_json_safe(path: Path):
+        try:
+            with path.open() as f:
+                return json.load(f)
+        except Exception as exc:
+            logger.warning(f"Skipping unreadable JSON file {path}: {exc}")
+            return None
 
     # Find most recent run directories
     runs_dir = output_dir / "runs"
@@ -49,28 +60,79 @@ def load_results(output_dir: Path) -> dict:
         date_dirs = sorted(runs_dir.iterdir(), reverse=True)
         for date_dir in date_dirs[:5]:  # Check last 5 days
             for run_dir in sorted(date_dir.iterdir(), reverse=True):
+                # Load diagnostic results
+                diag_path = run_dir / "diagnostic_results.json"
+                if diag_path.exists() and "diagnostic" not in results:
+                    payload = load_json_safe(diag_path)
+                    if payload is not None:
+                        results["diagnostic"] = payload
+                        results_paths["diagnostic"] = str(diag_path)
+                        logger.info(f"Loaded diagnostic results from {diag_path}")
+
                 # Load cluster repair results
                 cluster_path = run_dir / "cluster_repair_results.json"
                 if cluster_path.exists() and "cluster_repair" not in results:
-                    with open(cluster_path) as f:
-                        results["cluster_repair"] = json.load(f)
-                    logger.info(f"Loaded cluster repair from {cluster_path}")
+                    payload = load_json_safe(cluster_path)
+                    if payload is not None:
+                        results["cluster_repair"] = payload
+                        results_paths["cluster_repair"] = str(cluster_path)
+                        logger.info(f"Loaded cluster repair from {cluster_path}")
 
                 # Load causal results
                 causal_path = run_dir / "causal_cluster_repair_results.json"
                 if causal_path.exists() and "causal" not in results:
-                    with open(causal_path) as f:
-                        results["causal"] = json.load(f)
-                    logger.info(f"Loaded causal results from {causal_path}")
+                    payload = load_json_safe(causal_path)
+                    if payload is not None:
+                        results["causal"] = payload
+                        results_paths["causal"] = str(causal_path)
+                        logger.info(f"Loaded causal results from {causal_path}")
 
                 # Load predictive validity results
                 pv_path = run_dir / "predictive_validity_results.json"
-                if pv_path.exists() and "predictive_validity" not in results:
-                    with open(pv_path) as f:
-                        results["predictive_validity"] = json.load(f)
-                    logger.info(f"Loaded predictive validity from {pv_path}")
+                if pv_path.exists():
+                    payload = load_json_safe(pv_path)
+                    if payload is not None:
+                        model_name = payload.get("config", {}).get("model", "unknown")
+                        predictive_runs.append({
+                            "model": model_name,
+                            "path": str(pv_path),
+                            "run_dir": str(run_dir),
+                            "payload": payload,
+                        })
+                        if "predictive_validity" not in results:
+                            results["predictive_validity"] = payload
+                            results_paths["predictive_validity"] = str(pv_path)
+                            logger.info(f"Loaded predictive validity from {pv_path}")
+
+                # Load single-token repair validation
+                rv_path = run_dir / "repair_validation_results.json"
+                if rv_path.exists() and "repair_validation" not in results:
+                    payload = load_json_safe(rv_path)
+                    if payload is not None:
+                        results["repair_validation"] = payload
+                        results_paths["repair_validation"] = str(rv_path)
+                        logger.info(f"Loaded repair validation from {rv_path}")
+
+    if results_paths:
+        results["_paths"] = results_paths
+    if predictive_runs:
+        results["predictive_validity_runs"] = predictive_runs
 
     return results
+
+
+def _latest_predictive_runs_by_model(results: dict) -> list[dict]:
+    """Get latest predictive-validity run per model."""
+    runs = results.get("predictive_validity_runs", [])
+    if not runs:
+        return []
+
+    latest: dict[str, dict] = {}
+    for run in runs:
+        model = run.get("model", "unknown")
+        if model not in latest:
+            latest[model] = run
+    return list(latest.values())
 
 
 def figure1_predictive_validity(results: dict, output_dir: Path) -> None:
@@ -81,6 +143,7 @@ def figure1_predictive_validity(results: dict, output_dir: Path) -> None:
 
     pv = results["predictive_validity"]
     model_comp = pv.get("model_comparison", {})
+    use_simulated = pv.get("config", {}).get("use_simulated_failures", False)
 
     # Extract data
     models = ["Baseline\n(freq+type)", "Geometry\nOnly", "Full\nModel"]
@@ -121,15 +184,101 @@ def figure1_predictive_validity(results: dict, output_dir: Path) -> None:
 
     # Add improvement annotation
     improvement = aucs[1] - aucs[0]
-    ax.annotate(f'+{improvement:.3f}', xy=(1, aucs[1]), xytext=(1.3, aucs[1] - 0.05),
+    ax.annotate(f'{improvement:+.3f}', xy=(1, aucs[1]), xytext=(1.3, aucs[1] - 0.05),
                 fontsize=10, color='#e74c3c', fontweight='bold',
                 arrowprops=dict(arrowstyle='->', color='#e74c3c'))
+
+    if use_simulated:
+        ax.text(
+            0.5,
+            0.03,
+            'Warning: labels are simulated in this run',
+            transform=ax.transAxes,
+            ha='center',
+            va='bottom',
+            fontsize=8,
+            color='#c0392b',
+            fontstyle='italic',
+        )
 
     plt.tight_layout()
     fig.savefig(output_dir / "fig1_predictive_validity.pdf")
     fig.savefig(output_dir / "fig1_predictive_validity.png")
     plt.close()
     logger.info("Saved Figure 1: Predictive validity")
+
+
+def figure4_model_replication(results: dict, output_dir: Path) -> None:
+    """Figure 4: Multi-model predictive validity replication."""
+    runs = _latest_predictive_runs_by_model(results)
+    if not runs:
+        logger.warning("No predictive-validity runs found for replication figure")
+        return
+
+    model_labels = []
+    baseline_auc = []
+    geometry_auc = []
+    real_label_flags = []
+
+    for run in runs:
+        payload = run.get("payload", {})
+        cfg = payload.get("config", {})
+        model = cfg.get("model", "unknown")
+        model_labels.append(model.split("/")[-1][:20])
+        model_comp = payload.get("model_comparison", {})
+        baseline_auc.append(float(model_comp.get("baseline", {}).get("auc", 0.0)))
+        geometry_auc.append(float(model_comp.get("geometry", {}).get("auc", 0.0)))
+        real_label_flags.append(not bool(cfg.get("use_simulated_failures", False)))
+
+    x = np.arange(len(model_labels))
+    width = 0.35
+    fig, ax = plt.subplots(figsize=(max(6, len(model_labels) * 2.2), 4.2))
+
+    ax.bar(
+        x - width / 2,
+        baseline_auc,
+        width,
+        color="#95a5a6",
+        edgecolor="black",
+        linewidth=0.5,
+        label="Baseline AUC",
+    )
+    ax.bar(
+        x + width / 2,
+        geometry_auc,
+        width,
+        color="#3498db",
+        edgecolor="black",
+        linewidth=0.5,
+        label="Geometry AUC",
+    )
+
+    for idx, is_real in enumerate(real_label_flags):
+        if not is_real:
+            ax.text(
+                x[idx],
+                min(0.98, max(baseline_auc[idx], geometry_auc[idx]) + 0.03),
+                "sim",
+                ha="center",
+                va="bottom",
+                fontsize=8,
+                color="#c0392b",
+                fontweight="bold",
+            )
+
+    ax.set_xticks(x)
+    ax.set_xticklabels(model_labels, rotation=15, ha="right")
+    ax.set_ylabel("AUC-ROC")
+    ax.set_ylim(0.4, 1.0)
+    ax.set_title("Model Replication: Predictive Validity Across Models")
+    ax.legend(loc="lower right")
+    ax.axhline(0.5, linestyle="--", color="gray", alpha=0.5)
+
+    plt.tight_layout()
+    fig.savefig(output_dir / "fig4_model_replication.pdf")
+    fig.savefig(output_dir / "fig4_model_replication.png")
+    plt.close()
+    logger.info("Saved Figure 4: Model replication")
 
 
 def figure2_cluster_repair_geometry(results: dict, output_dir: Path) -> None:
@@ -242,9 +391,16 @@ def figure3_causal_geometry(results: dict, output_dir: Path) -> None:
 
 def table1_main_results(results: dict, output_dir: Path) -> None:
     """Table 1: Main experimental results."""
+    pv_model = (
+        results.get("predictive_validity", {})
+        .get("config", {})
+        .get("model", "unknown")
+        .split("/")[-1]
+    )
+
     lines = []
     lines.append("=" * 70)
-    lines.append("TABLE 1: DCTT Main Experimental Results (Qwen2.5-Coder-7B)")
+    lines.append(f"TABLE 1: DCTT Main Experimental Results ({pv_model})")
     lines.append("=" * 70)
     lines.append("")
 
@@ -254,11 +410,13 @@ def table1_main_results(results: dict, output_dir: Path) -> None:
     if "predictive_validity" in results:
         pv = results["predictive_validity"]
         mc = pv.get("model_comparison", {})
+        use_simulated = pv.get("config", {}).get("use_simulated_failures", False)
+        lines.append(f"  Label source:          {'SIMULATED (smoke-test only)' if use_simulated else 'REAL stress tests'}")
         lines.append(f"  Baseline (freq+type):  AUC = {mc.get('baseline', {}).get('auc', 0):.3f}")
         lines.append(f"  Geometry only:         AUC = {mc.get('geometry', {}).get('auc', 0):.3f}")
         lines.append(f"  Full model:            AUC = {mc.get('full', {}).get('auc', 0):.3f}")
         improvement = mc.get('geometry', {}).get('auc', 0) - mc.get('baseline', {}).get('auc', 0)
-        lines.append(f"  Improvement:           +{improvement:.3f}")
+        lines.append(f"  Improvement:           {improvement:+.3f}")
     lines.append("")
 
     # Cluster repair
@@ -267,11 +425,32 @@ def table1_main_results(results: dict, output_dir: Path) -> None:
     if "cluster_repair" in results:
         cr = results["cluster_repair"]
         summary = cr.get("summary", {})
+        repair_results = cr.get("repair_results", [])
+        cond_improvements = []
+        jaccards = []
+        for item in repair_results:
+            before = item.get("geometry_before", {}).get("cond")
+            after = item.get("geometry_after", {}).get("cond")
+            if before is not None and after is not None:
+                cond_improvements.append(before - after)
+            jaccard = item.get("mean_jaccard")
+            if jaccard is not None:
+                jaccards.append(jaccard)
+
+        cond_mean = float(np.mean(cond_improvements)) if cond_improvements else summary.get("mean_cond_improvement", 0.0)
+        cond_std = float(np.std(cond_improvements)) if cond_improvements else 0.0
+        jaccard_mean = float(np.mean(jaccards)) if jaccards else summary.get("mean_jaccard", 0.0)
+        jaccard_std = float(np.std(jaccards)) if jaccards else 0.0
+        clusters_improved = sum(1 for item in repair_results if item.get("geometry_improved"))
+        total_repaired = len(repair_results) or summary.get("n_clusters_repaired", 0)
+
         lines.append(f"  Clusters found:        {summary.get('n_clusters_found', 0)}")
         lines.append(f"  Clusters repaired:     {summary.get('n_clusters_repaired', 0)}")
-        lines.append(f"  Cond improvement:      {summary.get('mean_cond_improvement', 0):.3f} +/- {0.157:.3f}")
-        lines.append(f"  Jaccard overlap:       {summary.get('mean_jaccard', 0):.3f} +/- {0.030:.3f}")
-        lines.append(f"  Improvement rate:      {summary.get('clusters_improved', 0)}/{summary.get('n_clusters_repaired', 0)} (100%)")
+        lines.append(f"  Cond improvement:      {cond_mean:.3f} +/- {cond_std:.3f}")
+        lines.append(f"  Jaccard overlap:       {jaccard_mean:.3f} +/- {jaccard_std:.3f}")
+        if total_repaired:
+            pct = 100 * clusters_improved / total_repaired
+            lines.append(f"  Improvement rate:      {clusters_improved}/{total_repaired} ({pct:.0f}%)")
     lines.append("")
 
     # Causal experiment
@@ -290,15 +469,33 @@ def table1_main_results(results: dict, output_dir: Path) -> None:
     # Claims summary
     lines.append("D. SUPPORTED CLAIMS")
     lines.append("-" * 50)
-    lines.append("  [YES] Geometry metrics predict failures beyond confounds")
-    lines.append("  [YES] Cluster repair improves geometry vs placebo")
-    lines.append("  [NO]  Behavioral causal improvement (needs real stress tests)")
+    predictive_supported = False
+    if "predictive_validity" in results:
+        pv = results["predictive_validity"]
+        use_simulated = pv.get("config", {}).get("use_simulated_failures", False)
+        baseline_auc = pv.get("model_comparison", {}).get("baseline", {}).get("auc", 0.0)
+        geometry_auc = pv.get("model_comparison", {}).get("geometry", {}).get("auc", 0.0)
+        predictive_supported = (not use_simulated) and geometry_auc > baseline_auc
+
+    cluster_supported = False
+    if "cluster_repair" in results:
+        repair_results = results["cluster_repair"].get("repair_results", [])
+        cluster_supported = any(item.get("geometry_improved") for item in repair_results)
+
+    behavioral_supported = False
+    if "causal" in results:
+        summary = results["causal"].get("summary", {})
+        behavioral_supported = bool(summary.get("significant", False)) and summary.get("did", 0.0) < 0
+
+    lines.append(f"  [{'YES' if predictive_supported else 'NO'}] Geometry predicts failures beyond confounds")
+    lines.append(f"  [{'YES' if cluster_supported else 'NO'}] Cluster repair improves geometry vs placebo")
+    lines.append(f"  [{'YES' if behavioral_supported else 'NO'}] Behavioral causal improvement")
     lines.append("")
     lines.append("=" * 70)
 
     table_text = "\n".join(lines)
 
-    with open(output_dir / "table1_main_results.txt", "w") as f:
+    with (output_dir / "table1_main_results.txt").open("w") as f:
         f.write(table_text)
 
     print(table_text)
@@ -307,48 +504,100 @@ def table1_main_results(results: dict, output_dir: Path) -> None:
 
 def table2_flagged_tokens(results: dict, output_dir: Path) -> None:
     """Table 2: Examples of high-severity flagged tokens."""
-    # These are from the cluster repair run
-    flagged_examples = [
-        ("))):\\n", "Nested punctuation + newline", 3.54),
-        (" ...\\\\", "Escape sequence fragment", 3.50),
-        ('"For', "Quote + word fragment", 3.44),
-        ('("', "Bracket + quote", 3.37),
-        ("...'", "Ellipsis + quote (CJK)", 3.34),
-        ("'", "CJK punctuation", 3.31),
-        ("0", "Full-width digit", 3.30),
-        ("),\\r\\n", "Bracket + CRLF", 3.27),
-        ("',\\r\\r\\n", "Quote + double CRLF", 3.27),
-        ("))))\\n\\n", "Deep nesting + newlines", 3.26),
-    ]
+    diagnostic = results.get("diagnostic", [])
+    if not diagnostic:
+        logger.warning("No diagnostic results found for Table 2")
+        return
+
+    top_results = heapq.nlargest(
+        10,
+        diagnostic,
+        key=lambda item: item.get("severity", 0.0),
+    )
 
     lines = []
     lines.append("=" * 70)
     lines.append("TABLE 2: High-Severity Flagged Tokens (Top 10)")
     lines.append("=" * 70)
     lines.append("")
-    lines.append(f"{'Rank':<6}{'Token':<20}{'Category':<30}{'Severity':<10}")
+    lines.append(f"{'Rank':<6}{'TokenID':<9}{'Token':<20}{'Type':<15}{'Severity':<10}")
     lines.append("-" * 70)
 
-    for i, (token, category, severity) in enumerate(flagged_examples, 1):
-        # Escape for display
+    placeholder_count = 0
+    for i, item in enumerate(top_results, 1):
+        token_info = item.get("token_info", {})
+        token_id = token_info.get("token_id", -1)
+        token = str(token_info.get("token_str", ""))
+        token_type = str(token_info.get("token_type", "UNKNOWN"))
+        severity = float(item.get("severity", 0.0))
+
+        if token.startswith("token_"):
+            placeholder_count += 1
+
         display_token = repr(token)[1:-1][:18]
-        lines.append(f"{i:<6}{display_token:<20}{category:<30}{severity:<10.2f}")
+        lines.append(f"{i:<6}{token_id:<9}{display_token:<20}{token_type:<15}{severity:<10.2f}")
 
     lines.append("")
-    lines.append("Note: High-severity tokens cluster in:")
-    lines.append("  - Nested punctuation (brackets, quotes)")
-    lines.append("  - Mixed escape sequences")
-    lines.append("  - Non-ASCII characters (CJK, full-width)")
-    lines.append("  - Line ending variants (CRLF, mixed)")
+    if placeholder_count == len(top_results):
+        lines.append("Note: token strings are placeholder IDs in this census output.")
+        lines.append("      Regenerate census with real tokenizer metadata for lexical examples.")
+    else:
+        lines.append("Note: Top tokens are computed directly from diagnostic severity scores.")
     lines.append("=" * 70)
 
     table_text = "\n".join(lines)
 
-    with open(output_dir / "table2_flagged_tokens.txt", "w") as f:
+    with (output_dir / "table2_flagged_tokens.txt").open("w") as f:
         f.write(table_text)
 
     print(table_text)
     logger.info("Saved Table 2: Flagged tokens")
+
+
+def table3_model_replication(results: dict, output_dir: Path) -> None:
+    """Table 3: Latest predictive-validity results by model."""
+    runs = _latest_predictive_runs_by_model(results)
+    if not runs:
+        logger.warning("No predictive-validity runs found for Table 3")
+        return
+
+    lines = []
+    lines.append("=" * 96)
+    lines.append("TABLE 3: Predictive Validity Replication (Latest Run Per Model)")
+    lines.append("=" * 96)
+    lines.append("")
+    lines.append(
+        f"{'Model':<30}{'LabelSource':<15}{'BaselineAUC':<12}{'GeometryAUC':<12}{'Delta':<10}{'N':<8}"
+    )
+    lines.append("-" * 96)
+
+    for run in runs:
+        payload = run.get("payload", {})
+        cfg = payload.get("config", {})
+        model_name = cfg.get("model", "unknown")
+        model_short = model_name.split("/")[-1][:28]
+        use_sim = bool(cfg.get("use_simulated_failures", False))
+        label_source = "simulated" if use_sim else "real"
+
+        model_comp = payload.get("model_comparison", {})
+        baseline_auc = float(model_comp.get("baseline", {}).get("auc", 0.0))
+        geometry_auc = float(model_comp.get("geometry", {}).get("auc", 0.0))
+        delta = geometry_auc - baseline_auc
+        n_tokens = int(payload.get("summary", {}).get("n_tokens", 0))
+        lines.append(
+            f"{model_short:<30}{label_source:<15}{baseline_auc:<12.3f}{geometry_auc:<12.3f}{delta:<10.3f}{n_tokens:<8d}"
+        )
+
+    lines.append("")
+    lines.append("Note: Use rows with LabelSource=real for publication claims.")
+    lines.append("=" * 96)
+
+    table_text = "\n".join(lines)
+    with (output_dir / "table3_model_replication.txt").open("w") as f:
+        f.write(table_text)
+
+    print(table_text)
+    logger.info("Saved Table 3: Model replication")
 
 
 def main():
@@ -372,10 +621,12 @@ def main():
     figure1_predictive_validity(results, figures_dir)
     figure2_cluster_repair_geometry(results, figures_dir)
     figure3_causal_geometry(results, figures_dir)
+    figure4_model_replication(results, figures_dir)
 
     # Generate tables
     table1_main_results(results, figures_dir)
     table2_flagged_tokens(results, figures_dir)
+    table3_model_replication(results, figures_dir)
 
     logger.info(f"\nAll figures and tables saved to {figures_dir}")
 

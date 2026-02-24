@@ -284,9 +284,12 @@ def run_repair_loss_ablation(
             embedding = embeddings[token_id]
 
             # Get neighbors
-            query_vec = embedding.reshape(1, -1)
-            neighbors, _ = index.query(query_vec, k=k, exclude_self=True)
-            neighbors = neighbors[0]
+            neighbors, _ = index.query_single(
+                embedding,
+                k=k,
+                exclude_self=True,
+                self_index=token_id,
+            )
 
             # Get pre-repair metrics
             pre_stage2 = compute_stage2_metrics(
@@ -303,14 +306,21 @@ def run_repair_loss_ablation(
                 all_embeddings=embeddings,
                 index=index,
                 k=k,
+                token_id=token_id,
             )
 
             # Get post-repair metrics
             repaired_embedding = result.repaired_embedding
-            new_neighbors, _ = index.query(repaired_embedding.reshape(1, -1), k=k, exclude_self=True)
-            new_neighbors = new_neighbors[0]
+            new_neighbors, _ = index.query_single(
+                repaired_embedding,
+                k=k,
+                exclude_self=True,
+                self_index=token_id,
+            )
+            repaired_embeddings = embeddings.copy()
+            repaired_embeddings[token_id] = repaired_embedding
             post_stage2 = compute_stage2_metrics(
-                embeddings=embeddings,
+                embeddings=repaired_embeddings,
                 token_id=token_id,
                 neighbor_ids=new_neighbors,
             )
@@ -404,9 +414,12 @@ def run_anchor_sweep_ablation(
             original = embeddings[token_id].copy()
 
             # Get neighbors
-            query_vec = original.reshape(1, -1)
-            neighbors, _ = index.query(query_vec, k=k, exclude_self=True)
-            neighbors = neighbors[0]
+            neighbors, _ = index.query_single(
+                original,
+                k=k,
+                exclude_self=True,
+                self_index=token_id,
+            )
 
             # Get pre-repair cond
             pre_stage2 = compute_stage2_metrics(
@@ -423,16 +436,23 @@ def run_anchor_sweep_ablation(
                 all_embeddings=embeddings,
                 index=index,
                 k=k,
+                token_id=token_id,
             )
 
             delta = np.linalg.norm(result.repaired_embedding - original)
             deltas.append(delta)
 
             # Get post-repair cond
-            new_neighbors, _ = index.query(result.repaired_embedding.reshape(1, -1), k=k, exclude_self=True)
-            new_neighbors = new_neighbors[0]
+            new_neighbors, _ = index.query_single(
+                result.repaired_embedding,
+                k=k,
+                exclude_self=True,
+                self_index=token_id,
+            )
+            repaired_embeddings = embeddings.copy()
+            repaired_embeddings[token_id] = result.repaired_embedding
             post_stage2 = compute_stage2_metrics(
-                embeddings=embeddings,
+                embeddings=repaired_embeddings,
                 token_id=token_id,
                 neighbor_ids=new_neighbors,
             )

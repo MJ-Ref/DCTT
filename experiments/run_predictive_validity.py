@@ -30,7 +30,6 @@ from tqdm import tqdm
 from dctt.core.types import DiagnosticResult, TokenInfo, TokenType, FrequencyTier
 from dctt.evaluation.predictive import (
     PredictiveValidityAnalyzer,
-    PredictiveValidityResult,
     format_validity_report,
 )
 from dctt.metrics.stage1 import compute_stage1_metrics
@@ -119,35 +118,78 @@ def simulate_stress_test_failures(
     diagnostic_results: list[DiagnosticResult],
     seed: int = 42,
 ) -> dict[int, float]:
-    """Simulate stress test failures based on geometry metrics.
+    """Simulate stress test failures using confounds only.
 
-    For validation purposes, we create synthetic failures that have
-    a known relationship with geometry metrics plus noise.
-    This allows us to verify the analysis pipeline works correctly.
+    This is intended only for smoke tests when real model stress tests
+    are unavailable. Failures are generated from coarse confounds
+    (frequency tier and token type) plus noise, so geometry features
+    are not leaked directly into labels.
 
-    In production, replace with actual stress test results.
+    Do not use simulated failures for research claims.
     """
     rng = np.random.default_rng(seed)
-    failures = {}
+    failures: dict[int, float] = {}
+
+    tier_base = {
+        FrequencyTier.HIGH: 0.06,
+        FrequencyTier.MID: 0.12,
+        FrequencyTier.LOW: 0.20,
+    }
+    type_adjustment = {
+        TokenType.WHITESPACE: 0.02,
+        TokenType.FULL_WORD: 0.03,
+        TokenType.SUBWORD: 0.04,
+        TokenType.PUNCTUATION: 0.08,
+        TokenType.NUMERIC: 0.07,
+        TokenType.CODE_SYMBOL: 0.10,
+        TokenType.SPECIAL: 0.05,
+        TokenType.UNKNOWN: 0.05,
+    }
 
     for result in diagnostic_results:
-        # Create failure probability based on geometry
-        # High cond, low pr, high spread_q -> higher failure rate
-        geometry_score = (
-            0.3 * np.log1p(result.stage2.cond) / 5 +  # Normalize cond contribution
-            0.3 * (1 - result.stage2.pr / 50) +  # Low PR -> higher failure
-            0.2 * min(result.stage1.spread_q / 10, 1) +  # High spread -> failure
-            0.2 * result.severity / 10  # Severity contribution
-        )
-
-        # Clip to [0, 1] and add noise
-        base_prob = np.clip(geometry_score, 0, 1)
-        noise = rng.normal(0, 0.15)
-        failure_rate = np.clip(base_prob + noise, 0, 1)
-
-        failures[result.token_id] = failure_rate
+        base_prob = tier_base[result.token_info.frequency_tier]
+        base_prob += type_adjustment.get(result.token_info.token_type, 0.05)
+        noise = rng.normal(0.0, 0.05)
+        failures[result.token_id] = float(np.clip(base_prob + noise, 0.0, 1.0))
 
     return failures
+
+
+def _create_model_fn(
+    model: Any,
+    tokenizer: Any,
+    default_max_new_tokens: int,
+) -> Any:
+    """Create a callable prompt -> completion for stress test runner."""
+    import torch
+
+    def model_fn(prompt: str, max_new_tokens: int | None = None) -> str:
+        inputs = tokenizer(prompt, return_tensors="pt")
+
+        if hasattr(model, "device") and str(model.device) != "cpu":
+            inputs = {k: v.to(model.device) for k, v in inputs.items()}
+
+        generate_kwargs = {
+            "max_new_tokens": (
+                int(max_new_tokens)
+                if max_new_tokens is not None
+                else int(default_max_new_tokens)
+            ),
+            "do_sample": False,
+        }
+        pad_token_id = tokenizer.pad_token_id
+        if pad_token_id is None:
+            pad_token_id = tokenizer.eos_token_id
+        if pad_token_id is not None:
+            generate_kwargs["pad_token_id"] = pad_token_id
+
+        with torch.no_grad():
+            outputs = model.generate(**inputs, **generate_kwargs)
+
+        prompt_len = int(inputs["input_ids"].shape[1])
+        return tokenizer.decode(outputs[0][prompt_len:], skip_special_tokens=True)
+
+    return model_fn
 
 
 def run_stress_tests(
@@ -155,35 +197,68 @@ def run_stress_tests(
     diagnostic_results: list[DiagnosticResult],
     model: Any,
     tokenizer: Any,
-) -> dict[int, float]:
+) -> tuple[dict[int, float], dict[str, Any]]:
     """Run actual stress tests to get failure rates."""
-    from dctt.stress_tests.code_syntax import CodeSyntaxTest
-    from dctt.stress_tests.math_format import MathFormatTest
-    from dctt.stress_tests.runner import StressTestRunner
+    from dctt.stress_tests.forced_minimal_pair import (
+        ForcedTokenMinimalPairTest,
+        build_minimal_pair_control_map,
+    )
+    from dctt.stress_tests.runner import RunnerConfig, StressTestRunner
 
-    tests = [
-        CodeSyntaxTest(languages=["python"]),
-        MathFormatTest(),
-    ]
+    control_map = build_minimal_pair_control_map(
+        diagnostic_results,
+        seed=int(cfg.seed),
+    )
+    tests = [ForcedTokenMinimalPairTest(control_map=control_map, seed=int(cfg.seed))]
+
+    stress_cfg = cfg.get("stress_test", cfg.get("stress_tests", {}))
+    n_cases = int(stress_cfg.get("n_prompts", stress_cfg.get("n_samples", 10)))
+    max_new_tokens = int(stress_cfg.get("max_new_tokens", 32))
 
     runner = StressTestRunner(
         tests=tests,
-        model=model,
-        tokenizer=tokenizer,
+        config=RunnerConfig(n_cases_per_token=n_cases),
     )
 
-    token_ids = [r.token_id for r in diagnostic_results]
-    n_samples = cfg.get("stress_tests", {}).get("n_samples", 10)
+    tokens = [
+        (result.token_id, result.token_info.token_str)
+        for result in diagnostic_results
+    ]
+    model_fn = _create_model_fn(
+        model,
+        tokenizer,
+        default_max_new_tokens=max_new_tokens,
+    )
 
-    logger.info(f"Running stress tests on {len(token_ids)} tokens...")
-    results = runner.run(token_ids, n_samples=n_samples)
+    logger.info(
+        "Running stress tests on %d tokens with %d cases/token",
+        len(tokens),
+        n_cases,
+    )
+    results = runner.run(tokens=tokens, model_fn=model_fn)
+    failure_rates = runner.compute_overall_failure_rate(results)
 
-    failure_rates: dict[int, float] = {}
-    for token_id, token_results in results.items():
-        failures = sum(1 for r in token_results if not r.passed)
-        failure_rates[token_id] = failures / len(token_results) if token_results else 0.0
+    pair_results = results.get("forced_token_minimal_pair", [])
+    target_rates = [float(item.failure_rate) for item in pair_results]
+    control_rates = [
+        float(item.details.get("control_failure_rate", 0.0))
+        for item in pair_results
+    ]
+    gaps = [
+        float(item.details.get("failure_gap", 0.0))
+        for item in pair_results
+    ]
 
-    return failure_rates
+    summary = {
+        "mode": "forced_token_minimal_pair",
+        "n_tokens": len(pair_results),
+        "n_cases_per_token": n_cases,
+        "mean_target_failure_rate": float(np.mean(target_rates)) if target_rates else 0.0,
+        "mean_control_failure_rate": float(np.mean(control_rates)) if control_rates else 0.0,
+        "mean_failure_gap": float(np.mean(gaps)) if gaps else 0.0,
+        "pct_positive_gap": float(np.mean([g > 0 for g in gaps])) if gaps else 0.0,
+    }
+    return failure_rates, summary
 
 
 @hydra.main(version_base=None, config_path="../configs", config_name="config")
@@ -300,10 +375,25 @@ def main(cfg: DictConfig) -> None:
         diagnostic_results = run_diagnostics(cfg, embeddings, index, token_infos)
 
         # Get stress test results
-        use_simulated = cfg.get("predictive_validity", {}).get("use_simulated_failures", True)
+        use_simulated = cfg.get("predictive_validity", {}).get(
+            "use_simulated_failures",
+            False,
+        )
+
+        minimal_pair_summary: dict[str, Any] = {
+            "mode": "simulated",
+            "n_tokens": len(diagnostic_results),
+            "n_cases_per_token": 0,
+            "mean_target_failure_rate": 0.0,
+            "mean_control_failure_rate": 0.0,
+            "mean_failure_gap": 0.0,
+            "pct_positive_gap": 0.0,
+        }
 
         if use_simulated:
-            logger.info("Using simulated stress test failures for validation...")
+            logger.warning(
+                "Using simulated stress test failures (smoke-test mode only)."
+            )
             stress_test_results = simulate_stress_test_failures(diagnostic_results, seed=cfg.seed)
         else:
             # Load model and run actual stress tests
@@ -311,14 +401,35 @@ def main(cfg: DictConfig) -> None:
             from transformers import AutoModelForCausalLM
             import torch
 
-            device = "mps" if torch.backends.mps.is_available() else "cuda" if torch.cuda.is_available() else "cpu"
+            device = cfg.compute.device
+            if device == "auto":
+                if torch.backends.mps.is_available():
+                    device = "mps"
+                elif torch.cuda.is_available():
+                    device = "cuda"
+                else:
+                    device = "cpu"
+
+            torch_dtype = getattr(torch, str(cfg.model.torch_dtype), None)
+            if torch_dtype is None:
+                torch_dtype = torch.float32 if device == "cpu" else torch.float16
+            if device == "mps" and torch_dtype == torch.bfloat16:
+                torch_dtype = torch.float16
+
             model = AutoModelForCausalLM.from_pretrained(
                 cfg.model.name,
-                torch_dtype=torch.float16 if device != "cpu" else torch.float32,
-                device_map=device,
-                trust_remote_code=True,
+                torch_dtype=torch_dtype,
+                trust_remote_code=cfg.model.trust_remote_code,
+                low_cpu_mem_usage=cfg.model.get("low_cpu_mem_usage", True),
             )
-            stress_test_results = run_stress_tests(cfg, diagnostic_results, model, tokenizer)
+            model.to(device)
+            model.eval()
+            stress_test_results, minimal_pair_summary = run_stress_tests(
+                cfg,
+                diagnostic_results,
+                model,
+                tokenizer,
+            )
 
         # Run comprehensive predictive validity analysis
         logger.info("Running predictive validity analysis...")
@@ -422,10 +533,12 @@ def main(cfg: DictConfig) -> None:
                     for b in validity_result.bucket_analyses
                 ],
             },
+            "stress_test_summary": minimal_pair_summary,
             "config": {
                 "model": cfg.model.name,
                 "n_bootstrap": cfg.get("predictive_validity", {}).get("n_bootstrap", 100),
                 "use_simulated_failures": use_simulated,
+                "stress_test_design": "forced_token_minimal_pair" if not use_simulated else "simulated",
             },
         }
 

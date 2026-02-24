@@ -151,13 +151,15 @@ class EmbeddingExtractor:
             )
 
             # Load model
+            device_map = self.device if self.device not in {"cpu", "mps"} else None
             model = AutoModelForCausalLM.from_pretrained(
                 model_name,
                 revision=revision,
                 torch_dtype=dtype,
                 trust_remote_code=self.trust_remote_code,
                 low_cpu_mem_usage=self.low_cpu_mem_usage,
-                device_map=self.device if self.device != "cpu" else None,
+                # MPS device_map can overflow allocator warmup for full-sized models.
+                device_map=device_map,
             )
 
             # Extract embeddings

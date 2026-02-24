@@ -81,6 +81,7 @@ class EmbeddingRepairOptimizer:
         all_embeddings: NDArray[np.float64],
         index: "VectorIndex",
         k: int = 50,
+        token_id: int | None = None,
     ) -> RepairResult:
         """Repair a single embedding.
 
@@ -90,6 +91,8 @@ class EmbeddingRepairOptimizer:
             all_embeddings: Full embedding matrix (for neighbor lookup).
             index: kNN index for neighbor recomputation.
             k: Number of neighbors to use.
+            token_id: Token index of the repaired embedding (for robust
+                self-exclusion when querying perturbed vectors).
 
         Returns:
             RepairResult with repaired embedding and metrics.
@@ -155,9 +158,17 @@ class EmbeddingRepairOptimizer:
 
             # Recompute neighbors for next outer iteration
             if outer_iter < self.config.max_outer_iters - 1:
-                query_vec = current_embedding.reshape(1, -1)
-                new_neighbors, _ = index.query(query_vec, k=k, exclude_self=True)
-                neighbors = new_neighbors[0]
+                if token_id is not None:
+                    neighbors, _ = index.query_single(
+                        current_embedding,
+                        k=k,
+                        exclude_self=True,
+                        self_index=token_id,
+                    )
+                else:
+                    query_vec = current_embedding.reshape(1, -1)
+                    new_neighbors, _ = index.query(query_vec, k=k, exclude_self=True)
+                    neighbors = new_neighbors[0]
 
         # Compute final geometry
         geometry_after = self._compute_geometry_metrics(
@@ -166,7 +177,13 @@ class EmbeddingRepairOptimizer:
 
         # Compute semantic validation metrics
         semantic_validation = self._compute_semantic_validation(
-            current_embedding, original_embedding, neighbors, all_embeddings, index, k
+            current_embedding,
+            original_embedding,
+            neighbors,
+            all_embeddings,
+            index,
+            k,
+            token_id,
         )
 
         # Compute delta norm
@@ -296,6 +313,7 @@ class EmbeddingRepairOptimizer:
         all_embeddings: NDArray[np.float64],
         index: "VectorIndex",
         k: int,
+        token_id: int | None = None,
     ) -> dict[str, float]:
         """Compute semantic validation metrics.
 
@@ -306,6 +324,7 @@ class EmbeddingRepairOptimizer:
             all_embeddings: Full embedding matrix.
             index: kNN index.
             k: Number of neighbors.
+            token_id: Optional token id for explicit self exclusion.
 
         Returns:
             Dictionary of validation metrics.
@@ -314,9 +333,17 @@ class EmbeddingRepairOptimizer:
         similarity = float(np.dot(repaired_embedding, original_embedding))
 
         # Query new neighbors for repaired embedding
-        query_vec = repaired_embedding.reshape(1, -1)
-        new_neighbors, _ = index.query(query_vec, k=k, exclude_self=True)
-        new_neighbors = new_neighbors[0]
+        if token_id is not None:
+            new_neighbors, _ = index.query_single(
+                repaired_embedding,
+                k=k,
+                exclude_self=True,
+                self_index=token_id,
+            )
+        else:
+            query_vec = repaired_embedding.reshape(1, -1)
+            new_neighbors, _ = index.query(query_vec, k=k, exclude_self=True)
+            new_neighbors = new_neighbors[0]
 
         # Jaccard overlap with original neighbors
         set_old = set(neighbors.tolist())
@@ -355,15 +382,20 @@ def repair_embedding(
     optimizer = EmbeddingRepairOptimizer(config)
 
     # Get initial neighbors
-    query_vec = embedding.reshape(1, -1)
-    neighbors, _ = index.query(query_vec, k=k, exclude_self=True)
+    neighbors, _ = index.query_single(
+        embedding,
+        k=k,
+        exclude_self=True,
+        self_index=token_id,
+    )
 
     result = optimizer.repair(
         embedding=embedding,
-        neighbors=neighbors[0],
+        neighbors=neighbors,
         all_embeddings=all_embeddings,
         index=index,
         k=k,
+        token_id=token_id,
     )
     result.token_id = token_id
     return result
@@ -394,15 +426,20 @@ def repair_embeddings_batch(
     optimizer = EmbeddingRepairOptimizer(config)
 
     for i, (embedding, token_id) in enumerate(zip(embeddings, token_ids)):
-        query_vec = embedding.reshape(1, -1)
-        neighbors, _ = index.query(query_vec, k=k, exclude_self=True)
+        neighbors, _ = index.query_single(
+            embedding,
+            k=k,
+            exclude_self=True,
+            self_index=token_id,
+        )
 
         result = optimizer.repair(
             embedding=embedding,
-            neighbors=neighbors[0],
+            neighbors=neighbors,
             all_embeddings=all_embeddings,
             index=index,
             k=k,
+            token_id=token_id,
         )
         result.token_id = token_id
         results.append(result)

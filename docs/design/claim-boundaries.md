@@ -4,17 +4,7 @@ What DCTT can and cannot claim based on current evidence.
 
 ## Supported Claims ✅
 
-### 1. "Geometry metrics predict token-level failures beyond frequency/type confounds"
-
-**Evidence:**
-- Geometry-only model AUC: 0.803
-- Baseline (freq + type) AUC: 0.534
-- Improvement: +0.269
-- Within-bucket analysis: geometry predicts in all (tier × type) strata
-
-**Strength:** Strong. This is the primary contribution.
-
-### 2. "Cluster-level repair improves local geometry relative to placebo"
+### 1. "Cluster-level repair improves local geometry relative to placebo"
 
 **Evidence:**
 - Treatment condition number change: -0.269
@@ -24,7 +14,7 @@ What DCTT can and cannot claim based on current evidence.
 
 **Strength:** Strong for mechanistic claim. Treatment moves geometry in intended direction.
 
-### 3. "Single-token local optimization is insufficient when neighborhoods are uniformly pathological"
+### 2. "Single-token local optimization is insufficient when neighborhoods are uniformly pathological"
 
 **Evidence:**
 - Single-token repair: geometry unchanged despite embeddings moving
@@ -37,7 +27,19 @@ What DCTT can and cannot claim based on current evidence.
 
 ## NOT Supported Claims ❌
 
-### 1. "Repair causally improves downstream code/math behavior"
+### 1. "Geometry metrics predict token-level failures beyond frequency/type confounds"
+
+**Why not:**
+- Real-label run on Qwen2.5-7B: baseline AUC 0.732, geometry AUC 0.679 (delta -0.054)
+- Real-label run on Qwen2.5-Coder-7B: baseline AUC 0.489, geometry AUC 0.195 (delta -0.294)
+- Geometry-only does not beat baseline in either run
+
+**What's needed:**
+- Larger real-label sample sizes and stress-test budgets
+- Cross-seed replication
+- Stronger token-failure labels (e.g., forced-choice/logprob margins)
+
+### 2. "Repair causally improves downstream code/math behavior"
 
 **Why not:**
 - DiD (difference-in-differences) not significant (p = 0.81)
@@ -51,10 +53,10 @@ What DCTT can and cannot claim based on current evidence.
 - Larger sample (n=5 clusters insufficient)
 - Better matching on continuous confounds
 
-### 2. "Pathologies are consistent across model families"
+### 3. "Pathologies are consistent across model families"
 
 **Why not:**
-- Only tested on Qwen2.5-Coder-7B
+- Replication currently covers only two Qwen-family models
 - No Llama, Mistral, or other model comparisons
 
 **What's needed:**
@@ -62,7 +64,7 @@ What DCTT can and cannot claim based on current evidence.
 - Compare flagged token distributions
 - Test if same tokens flagged across models
 
-### 3. "Geometry metrics are the best predictors of token failures"
+### 4. "Geometry metrics are the best predictors of token failures"
 
 **Why not:**
 - Haven't compared against all alternatives
@@ -79,7 +81,7 @@ What DCTT can and cannot claim based on current evidence.
 ## Claim Language Guide
 
 **Use this language:**
-- "Geometry metrics predict failures beyond confounds"
+- "Real-label predictive-validity runs are currently negative for geometry-only models"
 - "Cluster repair improves geometry vs placebo"
 - "Single-token repair is insufficient for uniform pathologies"
 

@@ -14,11 +14,11 @@ Current state of DCTT components and what needs improvement.
 | Severity scoring | A | Bucketed z-scores working |
 | Single-token repair | C | Works but doesn't improve geometry |
 | Cluster repair | A | Key breakthrough, validated |
-| Stress tests | C | Prompts don't isolate tokens |
-| Predictive validity | A | Strong results with CIs |
+| Stress tests | B | Forced-token minimal-pair design implemented |
+| Predictive validity | B | Real-label runs complete; geometry signal currently weak |
 | Causal framework | B | Mechanistic OK, behavioral incomplete |
 | Documentation | B+ | Good coverage, could use more examples |
-| Test coverage | B | 45 tests, some gaps in repair |
+| Test coverage | B+ | 50 tests including integration smoke coverage |
 
 ## What's Working Well
 
@@ -26,7 +26,7 @@ Current state of DCTT components and what needs improvement.
 - Full census completes in 7.5 minutes on 152k tokens
 - Metrics are stable across k values
 - Severity scoring handles frequency/type confounds
-- Predictive validity shows clear signal
+- Predictive-validity pipeline is reproducible end-to-end
 
 ### Cluster Repair
 - 100% improvement rate on tested clusters
@@ -42,10 +42,10 @@ Current state of DCTT components and what needs improvement.
 
 ## What Needs Work
 
-### Stress Tests (Priority: High)
-**Problem:** Current prompts don't force target token inclusion
-**Impact:** Can't make behavioral causal claims
-**Solution:** Forced-token decoding or minimal pairs
+### Predictive Validity Signal (Priority: High)
+**Problem:** In real-label runs, geometry-only underperforms confound baselines
+**Impact:** RQ1 claim is not yet publication-strength
+**Solution:** Increase sample size, improve behavioral labels, and test stronger metrics/features
 
 ### Causal Behavioral Evidence (Priority: High)
 **Problem:** DiD not significant, outcomes simulated
@@ -53,7 +53,7 @@ Current state of DCTT components and what needs improvement.
 **Solution:** Real model inference with embedding injection
 
 ### Multi-Model Validation (Priority: Medium)
-**Problem:** Only tested on Qwen2.5-Coder-7B
+**Problem:** Replicated on two Qwen models, but no cross-family validation
 **Impact:** Results may not generalize
 **Solution:** Run on Llama, Mistral
 
@@ -74,11 +74,11 @@ Current state of DCTT components and what needs improvement.
 | Hardcoded paths in some scripts | experiments/*.py | Low |
 | Missing type hints in repair | src/dctt/repair/ | Low |
 | Duplicate metric computation | census vs validation | Low |
-| No integration tests | tests/ | Medium |
+| Stress tests rely on exact-match generation checks (no logprob scoring) | src/dctt/stress_tests/ | Medium |
 
 ## Next Quality Goals
 
-1. Add integration test for full pipeline
-2. Implement forced-token stress tests
-3. Add type hints to repair module
-4. Remove hardcoded paths
+1. Expand real-label predictive runs (larger n, more prompts, more seeds)
+2. Add cross-family replication (Llama/Mistral class models)
+3. Strengthen stress-test scoring with forced-choice/logprob margins
+4. Add type hints to repair module and remove remaining hardcoded paths

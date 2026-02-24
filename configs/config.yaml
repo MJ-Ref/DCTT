@@ -41,6 +41,7 @@ neighbors:
 stress_test:
   n_tokens: 50  # Number of high/low severity tokens to test
   n_prompts: 5  # Prompts per token
+  max_new_tokens: 32  # Generation cap for stress-test responses
   use_mock: false  # Use mock model for testing
 
 # Repair validation settings
@@ -52,7 +53,7 @@ repair_validation:
 predictive_validity:
   n_bootstrap: 100  # Bootstrap samples for confidence intervals
   failure_threshold: 0.3  # Threshold for binarizing failure rate
-  use_simulated_failures: true  # Use simulated failures for testing
+  use_simulated_failures: false  # Synthetic labels are smoke-test only
 
 # Repair settings
 repair:

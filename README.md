@@ -227,11 +227,10 @@ Full vocabulary census on 152,064 tokens (3,584 dimensions):
 | Processing speed | ~330 tokens/sec |
 | Total census time | 7.5 minutes |
 
-**High-severity token types:**
-- Nested punctuation: `))):\n`, `))))\n\n`
-- Mixed quotes/escapes: ` ...\'`, `"For`, `("`, `…"`
-- Special characters: `、` (Chinese), `０` (full-width)
-- Line ending variants: `),\r\n`, `',\r\r\n`
+**High-severity token outputs in the current census artifact:**
+- The saved `diagnostic_results.json` currently uses placeholder token strings (`token_<id>`)
+- Token type is `UNKNOWN` in that artifact
+- Lexical examples should be treated as pending until census writes decoded tokenizer strings
 
 ### Single-Token Repair Validation
 
@@ -263,6 +262,14 @@ Full vocabulary census on 152,064 tokens (3,584 dimensions):
 
 **Not Yet Supported:** "Repair causally improves downstream behavior." Requires real stress tests with model inference, better matching, and larger samples.
 
+### Predictive Validity Artifact Status
+
+Latest real-label predictive-validity runs (forced-token minimal-pair stress tests):
+- `Qwen/Qwen2.5-7B`: baseline AUC `0.732`, geometry AUC `0.679`, full AUC `0.776`
+- `Qwen/Qwen2.5-Coder-7B`: baseline AUC `0.489`, geometry AUC `0.195`, full AUC `0.390`
+
+Current interpretation: geometry-only features do **not** beat confound baselines in these real-label runs, so the predictive claim is not yet supported for publication.
+
 ## Project Status
 
 This is a research codebase under active development. Current status:
@@ -280,10 +287,11 @@ This is a research codebase under active development. Current status:
 - [x] Full census on Qwen2.5-Coder-7B
 - [x] Single-token repair validation (negative result)
 - [x] **Cluster-level repair** (positive result - geometry improves!)
-- [x] **Predictive validity analysis** with confound controls
+- [x] Forced-token minimal-pair stress tests
+- [x] Predictive-validity analysis pipeline (real-label runs complete)
 - [x] **Causal experiment framework** (mechanistic claim validated)
 - [ ] Causal behavioral evidence (needs real stress tests)
-- [ ] Multi-model comparison (Llama, Mistral)
+- [ ] Cross-family multi-model comparison (Llama, Mistral)
 
 ## Citation
 
