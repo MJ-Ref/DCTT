@@ -14,20 +14,27 @@ Reference numbers from DCTT experiments. Use these for consistency across docume
 | Processing speed | ~330 tokens/sec |
 | Census time | 7.5 minutes |
 
-### Predictive Validity (RQ1)
+### Predictive Validity (RQ1, Final Strict Package)
 
-| Model | AUC | 95% CI |
-|-------|-----|--------|
-| Baseline (freq + type) | 0.534 | [0.48, 0.59] |
-| Geometry only | 0.803 | [0.76, 0.85] |
-| Full model | 0.803 | [0.76, 0.85] |
-| **Improvement** | **+0.269** | |
+Strict package (forced-token minimal-pair, real labels, confound alignment):
+- Total runs: 20 (4 models x 5 seeds/model)
+- Gate verdict: FAIL
 
-Top features by importance:
-1. severity (0.15)
-2. logdet (0.12)
-3. cond (0.08)
-4. pr (0.06)
+Pooled effects:
+
+| Effect | Mean | 95% CI | Positive Runs |
+|--------|------|--------|---------------|
+| Geometry - Baseline | -0.128 | [-0.168, -0.088] | 1/20 |
+| Full - Baseline | -0.012 | [-0.023, -0.000] | 4/20 |
+
+Per-model geometry-minus-baseline means:
+
+| Model | Mean | 95% CI | Positive Runs |
+|-------|------|--------|---------------|
+| qwen2_5_coder_7b | -0.211 | [-0.256, -0.166] | 0/5 |
+| qwen2_5_7b | -0.164 | [-0.229, -0.099] | 0/5 |
+| mistral_7b | -0.074 | [-0.168, +0.020] | 0/5 |
+| tinyllama_1_1b | -0.063 | [-0.160, +0.034] | 1/5 |
 
 ### Cluster Repair (RQ2 - Mechanistic)
 
@@ -67,20 +74,10 @@ Statistical tests:
 - ATE: 0.179 (not meaningful - reflects baseline difference)
 - DiD: +0.022, p = 0.81 (not significant)
 
-### High-Severity Token Examples
+### High-Severity Token Outputs
 
-| Rank | Token | Category | Severity |
-|------|-------|----------|----------|
-| 1 | `))):\n` | Nested punctuation | 3.54 |
-| 2 | ` ...\\` | Escape fragment | 3.50 |
-| 3 | `"For` | Quote + word | 3.44 |
-| 4 | `("` | Bracket + quote | 3.37 |
-| 5 | `...'` | Ellipsis + CJK | 3.34 |
-| 6 | `'` | CJK punctuation | 3.31 |
-| 7 | `0` | Full-width digit | 3.30 |
-| 8 | `),\r\n` | Bracket + CRLF | 3.27 |
-| 9 | `',\r\r\n` | Quote + double CRLF | 3.27 |
-| 10 | `))))\n\n` | Deep nesting | 3.26 |
+Current saved census artifact uses placeholder token strings (`token_<id>`) and `UNKNOWN` token type.
+Use token IDs + severity for claim-bearing diagnostics until a decoded-token census artifact is produced.
 
 ## Metric Definitions
 

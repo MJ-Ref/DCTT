@@ -351,6 +351,13 @@ Generated publication assets include:
 - `outputs/figures/PUBLICATION_MANIFEST.json`
 - `outputs/figures/PUBLICATION_MANIFEST.md`
 
+Submission package integrity check:
+
+```bash
+python scripts/verify_submission_package.py \
+  --lock configs/paper/submission_package_lock.yaml
+```
+
 ## Project Status
 
 This is a research codebase under active development. Current status:

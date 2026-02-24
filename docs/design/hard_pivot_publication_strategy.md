@@ -115,3 +115,4 @@ Do not claim:
 5. Tag exploratory analyses explicitly as hypothesis-generating.
 6. Generate a publication manifest with source/output hashes and git commit metadata.
 7. Keep diagram source under `figures_src/` and export vector outputs (`.svg`, `.pdf`) by script only.
+8. Run `python scripts/verify_submission_package.py --lock configs/paper/submission_package_lock.yaml` before RC tagging.

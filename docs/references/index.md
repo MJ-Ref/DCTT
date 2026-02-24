@@ -30,7 +30,9 @@ severity = scorer.compute_severity(metrics_df)
 
 ### Key Numbers
 
-- Geometry AUC: **0.803** (vs baseline 0.534)
+- Strict predictive gate verdict: **FAIL** (20 runs, 4 models)
+- Pooled geometry-minus-baseline delta: **-0.128** (95% CI [-0.168, -0.088])
+- Pooled full-minus-baseline delta: **-0.012** (95% CI [-0.023, -0.000])
 - Cond reduction: **0.427 ± 0.157**
 - Jaccard overlap: **0.836 ± 0.030**
 - Treatment effect: **-0.269** (vs control +0.036)

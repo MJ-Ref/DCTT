@@ -7,6 +7,7 @@ Core architectural and technical decisions.
 - [Architecture](design/architecture.md) - Pipeline stages, module structure, design decisions
 - [Core Insights](design/core-insights.md) - Critical discoveries (gradient issue, cluster repair, etc.)
 - [Claim Boundaries](design/claim-boundaries.md) - What's supported vs not supported
+- [Submission Reproducibility Appendix](design/submission_reproducibility_appendix.md) - Lock, verify, and release-candidate process
 
 ## References
 

@@ -11,6 +11,7 @@ Architectural decisions and technical insights for DCTT.
 | [Claim Boundaries](claim-boundaries.md) | What the research can and cannot claim |
 | [Predictive Negative Reframing](predictive_negative_reframing.md) | Manuscript reframing for strict predictive-gate FAIL outcomes |
 | [Hard Pivot Publication Strategy](hard_pivot_publication_strategy.md) | Final publication strategy after strict predictive package failure |
+| [Submission Reproducibility Appendix](submission_reproducibility_appendix.md) | Reviewer-facing artifact lock, verification, and RC procedure |
 
 ## Key Takeaways
 
