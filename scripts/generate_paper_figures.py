@@ -13,13 +13,19 @@ Usage:
 
 from __future__ import annotations
 
+import argparse
 import heapq
+import hashlib
 import json
 import logging
+import subprocess
+from datetime import datetime, timezone
 from pathlib import Path
 
 import matplotlib.pyplot as plt
 import numpy as np
+import yaml
+from matplotlib.patches import FancyArrowPatch, FancyBboxPatch
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -38,6 +44,61 @@ plt.rcParams.update({
     'savefig.dpi': 300,
     'savefig.bbox': 'tight',
 })
+
+
+def _resolve_path(path_value: str | Path, repo_root: Path) -> Path:
+    path = Path(path_value)
+    return path if path.is_absolute() else (repo_root / path).resolve()
+
+
+def _load_json(path: Path) -> dict | None:
+    try:
+        with path.open(encoding="utf-8") as f:
+            return json.load(f)
+    except Exception as exc:
+        logger.warning("Skipping unreadable JSON file %s: %s", path, exc)
+        return None
+
+
+def _load_yaml(path: Path) -> dict:
+    with path.open(encoding="utf-8") as f:
+        payload = yaml.safe_load(f) or {}
+    if not isinstance(payload, dict):
+        raise RuntimeError(f"YAML payload is not a mapping: {path}")
+    return payload
+
+
+def _file_sha256(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as f:
+        for chunk in iter(lambda: f.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def _sanitize_manifest_source_path(path_str: str) -> Path:
+    base = path_str.split("#", 1)[0].strip()
+    return Path(base)
+
+
+def _git_metadata(repo_root: Path) -> dict:
+    def _run_git(args: list[str], fallback: str = "unknown") -> str:
+        try:
+            out = subprocess.check_output(
+                ["git", *args],
+                cwd=repo_root,
+                text=True,
+                stderr=subprocess.DEVNULL,
+            ).strip()
+            return out or fallback
+        except Exception:
+            return fallback
+
+    return {
+        "branch": _run_git(["rev-parse", "--abbrev-ref", "HEAD"]),
+        "commit": _run_git(["rev-parse", "HEAD"]),
+        "is_dirty": _run_git(["status", "--porcelain"], fallback="") != "",
+    }
 
 
 def _predictive_proxy_from_sweep(
@@ -253,6 +314,133 @@ def load_results(output_dir: Path) -> dict:
     return results
 
 
+def _attach_predictive_sweep_from_protocol_lock(
+    *,
+    results: dict,
+    results_paths: dict,
+    sweep_root: Path,
+    protocol_lock_path: Path,
+    strict_lock: bool,
+) -> bool:
+    lock_payload = _load_json(protocol_lock_path)
+    if lock_payload is None:
+        if strict_lock:
+            raise RuntimeError(f"Unreadable protocol lock file: {protocol_lock_path}")
+        logger.warning("Skipping unreadable protocol lock file: %s", protocol_lock_path)
+        return False
+
+    locked_sweep = lock_payload.get("sweep_results_path")
+    if not isinstance(locked_sweep, str) or not locked_sweep:
+        if strict_lock:
+            raise RuntimeError(
+                f"Protocol lock missing sweep_results_path: {protocol_lock_path}"
+            )
+        logger.warning(
+            "Protocol lock missing sweep_results_path: %s", protocol_lock_path
+        )
+        return False
+
+    locked_path = Path(locked_sweep)
+    if not locked_path.is_absolute():
+        locked_path = (sweep_root / locked_path).resolve()
+
+    locked_payload = _load_json(locked_path)
+    if locked_payload is None or not locked_payload.get("aggregate"):
+        if strict_lock:
+            raise RuntimeError(
+                "Protocol lock points to missing/invalid sweep aggregate: "
+                f"{locked_path}"
+            )
+        logger.warning(
+            "Protocol lock points to missing/invalid sweep aggregate: %s", locked_path
+        )
+        return False
+
+    results["predictive_validity_sweep"] = locked_payload
+    results["_predictive_protocol_lock"] = lock_payload
+    results_paths["predictive_protocol_lock"] = str(protocol_lock_path)
+    results_paths["predictive_validity_sweep"] = str(locked_path)
+    proxy = _predictive_proxy_from_sweep(locked_payload)
+    if proxy is not None:
+        results["predictive_validity"] = proxy
+        results_paths["predictive_validity"] = (
+            f"{locked_path}#aggregate:{proxy['config']['model']}"
+        )
+    logger.info(
+        "Loaded predictive validity sweep from protocol lock: %s",
+        locked_path,
+    )
+    return True
+
+
+def load_results_from_paper_lock(
+    *,
+    output_dir: Path,
+    paper_lock_path: Path,
+    strict_lock: bool = True,
+) -> dict:
+    repo_root = output_dir.parent
+    lock_payload = _load_yaml(paper_lock_path)
+    artifacts = lock_payload.get("artifacts", {})
+    if not isinstance(artifacts, dict):
+        raise RuntimeError(
+            f"Paper lock missing 'artifacts' mapping: {paper_lock_path}"
+        )
+
+    def _maybe_load_json(
+        result_key: str,
+        artifact_key: str,
+        *,
+        required: bool,
+    ) -> None:
+        rel_path = artifacts.get(artifact_key)
+        if not rel_path:
+            if required and strict_lock:
+                raise RuntimeError(
+                    f"Paper lock missing required artifact '{artifact_key}': "
+                    f"{paper_lock_path}"
+                )
+            return
+
+        artifact_path = _resolve_path(rel_path, repo_root)
+        payload = _load_json(artifact_path)
+        if payload is None:
+            if required and strict_lock:
+                raise RuntimeError(f"Unreadable required artifact: {artifact_path}")
+            return
+
+        results[result_key] = payload
+        results_paths[result_key] = str(artifact_path)
+        logger.info("Loaded %s from lock: %s", result_key, artifact_path)
+
+    results: dict = {"_paper_lock": str(paper_lock_path)}
+    results_paths: dict = {"paper_lock": str(paper_lock_path)}
+
+    _maybe_load_json("diagnostic", "diagnostic_results", required=True)
+    _maybe_load_json("cluster_repair", "cluster_repair_results", required=True)
+    _maybe_load_json("causal", "causal_cluster_repair_results", required=True)
+    _maybe_load_json("hard_pivot_report", "hard_pivot_report", required=False)
+
+    sweep_root = output_dir / "sweeps" / "predictive_validity"
+    protocol_lock_rel = artifacts.get("predictive_protocol_lock")
+    protocol_lock_path = (
+        _resolve_path(protocol_lock_rel, repo_root)
+        if protocol_lock_rel
+        else sweep_root / "PROTOCOL_LOCK.json"
+    )
+
+    _attach_predictive_sweep_from_protocol_lock(
+        results=results,
+        results_paths=results_paths,
+        sweep_root=sweep_root,
+        protocol_lock_path=protocol_lock_path,
+        strict_lock=strict_lock,
+    )
+
+    results["_paths"] = results_paths
+    return results
+
+
 def _latest_predictive_runs_by_model(results: dict) -> list[dict]:
     """Get latest predictive-validity run per model."""
     runs = results.get("predictive_validity_runs", [])
@@ -267,8 +455,226 @@ def _latest_predictive_runs_by_model(results: dict) -> list[dict]:
     return list(latest.values())
 
 
+def figure0_pipeline_diagram(output_dir: Path, spec_path: Path) -> None:
+    """Figure 0: Deterministic pipeline diagram from source spec."""
+    if not spec_path.exists():
+        logger.warning("Pipeline diagram spec not found: %s", spec_path)
+        return
+
+    spec = _load_yaml(spec_path)
+    stages = spec.get("stages", [])
+    edges = spec.get("edges", [])
+    layout = spec.get("layout", {})
+    footer = spec.get("footer", {})
+
+    if not stages:
+        logger.warning("Pipeline diagram spec has no stages: %s", spec_path)
+        return
+
+    xlim = layout.get("xlim", [0.0, 14.0])
+    ylim = layout.get("ylim", [0.0, 8.0])
+
+    fig, ax = plt.subplots(figsize=(12.5, 7.0))
+    ax.set_xlim(float(xlim[0]), float(xlim[1]))
+    ax.set_ylim(float(ylim[0]), float(ylim[1]))
+    ax.axis("off")
+
+    node_map: dict[str, dict] = {}
+    for stage in stages:
+        stage_id = str(stage["id"])
+        x = float(stage["x"])
+        y = float(stage["y"])
+        w = float(stage["width"])
+        h = float(stage["height"])
+        color = str(stage.get("color", "#E8E8E8"))
+        label = str(stage.get("label", stage_id))
+        detail = str(stage.get("detail", "")).strip()
+
+        node_map[stage_id] = {"x": x, "y": y, "w": w, "h": h}
+        box = FancyBboxPatch(
+            (x - w / 2.0, y - h / 2.0),
+            w,
+            h,
+            boxstyle="round,pad=0.06,rounding_size=0.18",
+            facecolor=color,
+            edgecolor="black",
+            linewidth=1.3,
+        )
+        ax.add_patch(box)
+        ax.text(
+            x,
+            y + 0.14,
+            label,
+            ha="center",
+            va="center",
+            fontsize=9.5,
+            fontweight="bold",
+            color="#1F2933",
+        )
+        if detail:
+            ax.text(
+                x,
+                y - 0.36,
+                detail,
+                ha="center",
+                va="center",
+                fontsize=8.1,
+                color="#273444",
+            )
+
+    for edge in edges:
+        src = node_map.get(str(edge.get("from", "")))
+        dst = node_map.get(str(edge.get("to", "")))
+        if src is None or dst is None:
+            continue
+
+        dx = dst["x"] - src["x"]
+        dy = dst["y"] - src["y"]
+        if abs(dx) >= abs(dy):
+            sx = src["x"] + np.sign(dx) * (src["w"] / 2.0)
+            sy = src["y"]
+            ex = dst["x"] - np.sign(dx) * (dst["w"] / 2.0)
+            ey = dst["y"]
+        else:
+            sx = src["x"]
+            sy = src["y"] + np.sign(dy) * (src["h"] / 2.0)
+            ex = dst["x"]
+            ey = dst["y"] - np.sign(dy) * (dst["h"] / 2.0)
+
+        style = str(edge.get("style", "solid"))
+        arrow = FancyArrowPatch(
+            (sx, sy),
+            (ex, ey),
+            arrowstyle="->",
+            mutation_scale=13,
+            linewidth=1.5,
+            color="#212121",
+            linestyle="--" if style == "dashed" else "-",
+            connectionstyle="arc3,rad=0.0",
+        )
+        ax.add_patch(arrow)
+
+    title = str(spec.get("title", "DCTT Pipeline"))
+    subtitle = str(spec.get("subtitle", "")).strip()
+    ax.text(
+        (float(xlim[0]) + float(xlim[1])) / 2.0,
+        float(ylim[1]) - 0.35,
+        title,
+        ha="center",
+        va="center",
+        fontsize=14,
+        fontweight="bold",
+    )
+    if subtitle:
+        ax.text(
+            (float(xlim[0]) + float(xlim[1])) / 2.0,
+            float(ylim[1]) - 0.75,
+            subtitle,
+            ha="center",
+            va="center",
+            fontsize=9.8,
+            color="#4B5563",
+        )
+
+    footer_text = str(footer.get("text", "")).strip()
+    if footer_text:
+        ax.text(
+            float(footer.get("x", 7.0)),
+            float(footer.get("y", 0.8)),
+            footer_text,
+            ha="center",
+            va="center",
+            fontsize=8.5,
+            color="#374151",
+        )
+
+    plt.tight_layout()
+    fig.savefig(output_dir / "fig0_pipeline_diagram.svg")
+    fig.savefig(output_dir / "fig0_pipeline_diagram.pdf")
+    fig.savefig(output_dir / "fig0_pipeline_diagram.png")
+    plt.close()
+    logger.info("Saved Figure 0: Pipeline diagram (svg/pdf/png)")
+
+
 def figure1_predictive_validity(results: dict, output_dir: Path) -> None:
     """Figure 1: Predictive validity - geometry vs baseline."""
+    hard_pivot = results.get("hard_pivot_report", {})
+    pooled = hard_pivot.get("pooled", {})
+    if pooled:
+        labels = ["Geometry - Baseline", "Full - Baseline"]
+        means = [
+            float(pooled.get("geometry_minus_baseline_mean", 0.0)),
+            float(pooled.get("full_minus_baseline_mean", 0.0)),
+        ]
+        ci_blocks = [
+            pooled.get("geometry_minus_baseline_ci", [0.0, 0.0]),
+            pooled.get("full_minus_baseline_ci", [0.0, 0.0]),
+        ]
+        errors = np.array(
+            [
+                [means[0] - float(ci_blocks[0][0]), float(ci_blocks[0][1]) - means[0]],
+                [means[1] - float(ci_blocks[1][0]), float(ci_blocks[1][1]) - means[1]],
+            ]
+        ).T
+
+        fig, ax = plt.subplots(figsize=(5.6, 4.0))
+        bars = ax.bar(
+            labels,
+            means,
+            color=["#D6604D", "#4393C3"],
+            edgecolor="black",
+            linewidth=0.6,
+        )
+        ax.errorbar(labels, means, yerr=errors, fmt="none", color="black", capsize=5)
+        ax.axhline(0.0, color="gray", linestyle="--", linewidth=1.0, alpha=0.7)
+        ax.set_ylabel("AUC Delta")
+        ax.set_title("Strict Predictive Deltas (Pooled Across 20 Runs)")
+        ax.set_ylim(min(-0.28, min(means) - 0.04), max(0.06, max(means) + 0.04))
+
+        pos_geom = int(pooled.get("geometry_positive_runs", 0))
+        pos_full = int(pooled.get("full_positive_runs", 0))
+        total_runs = int(hard_pivot.get("total_runs", 0))
+        for idx, (bar, mean) in enumerate(zip(bars, means)):
+            ax.text(
+                bar.get_x() + bar.get_width() / 2.0,
+                mean + (0.012 if mean >= 0 else -0.012),
+                f"{mean:+.3f}",
+                ha="center",
+                va="bottom" if mean >= 0 else "top",
+                fontsize=10,
+                fontweight="bold",
+            )
+            positive = pos_geom if idx == 0 else pos_full
+            ax.text(
+                bar.get_x() + bar.get_width() / 2.0,
+                ax.get_ylim()[0] + 0.01,
+                f"positive: {positive}/{total_runs}",
+                ha="center",
+                va="bottom",
+                fontsize=8,
+                color="#374151",
+            )
+
+        verdict = hard_pivot.get("verdicts", {}).get("strict_predictive_gate", "unknown")
+        ax.text(
+            0.5,
+            0.95,
+            f"Gate verdict: {verdict}",
+            transform=ax.transAxes,
+            ha="center",
+            va="top",
+            fontsize=9,
+            color="#7F1D1D" if str(verdict).upper() == "FAIL" else "#065F46",
+            fontweight="bold",
+        )
+
+        plt.tight_layout()
+        fig.savefig(output_dir / "fig1_predictive_validity.pdf")
+        fig.savefig(output_dir / "fig1_predictive_validity.png")
+        plt.close()
+        logger.info("Saved Figure 1: Hard pivot pooled predictive deltas")
+        return
+
     if "predictive_validity" not in results:
         logger.warning("No predictive validity results found")
         return
@@ -342,6 +748,91 @@ def figure1_predictive_validity(results: dict, output_dir: Path) -> None:
 
 def figure4_model_replication(results: dict, output_dir: Path) -> None:
     """Figure 4: Multi-model predictive validity replication."""
+    hard_pivot = results.get("hard_pivot_report", {})
+    per_model = hard_pivot.get("per_model", {})
+    if per_model:
+        model_labels = sorted(per_model.keys())
+        geom_mean = [
+            float(per_model[m].get("geometry_minus_baseline_mean", 0.0))
+            for m in model_labels
+        ]
+        full_mean = [
+            float(per_model[m].get("full_minus_baseline_mean", 0.0))
+            for m in model_labels
+        ]
+
+        def _err(ci: list[float], mean: float) -> tuple[float, float]:
+            return (
+                mean - float(ci[0]),
+                float(ci[1]) - mean,
+            )
+
+        geom_err = np.array(
+            [
+                _err(per_model[m].get("geometry_minus_baseline_ci", [0.0, 0.0]), geom_mean[i])
+                for i, m in enumerate(model_labels)
+            ]
+        ).T
+        full_err = np.array(
+            [
+                _err(per_model[m].get("full_minus_baseline_ci", [0.0, 0.0]), full_mean[i])
+                for i, m in enumerate(model_labels)
+            ]
+        ).T
+
+        x = np.arange(len(model_labels))
+        width = 0.36
+        fig, ax = plt.subplots(figsize=(max(7.0, len(model_labels) * 2.2), 4.6))
+        ax.bar(
+            x - width / 2.0,
+            geom_mean,
+            width,
+            yerr=geom_err,
+            capsize=4,
+            color="#D6604D",
+            edgecolor="black",
+            linewidth=0.6,
+            label="Geometry - Baseline (mean ± 95% CI)",
+        )
+        ax.bar(
+            x + width / 2.0,
+            full_mean,
+            width,
+            yerr=full_err,
+            capsize=4,
+            color="#4393C3",
+            edgecolor="black",
+            linewidth=0.6,
+            label="Full - Baseline (mean ± 95% CI)",
+        )
+
+        ax.axhline(0.0, linestyle="--", color="gray", linewidth=1.0, alpha=0.7)
+        ax.set_xticks(x)
+        ax.set_xticklabels([m[:22] for m in model_labels], rotation=15, ha="right")
+        ax.set_ylabel("AUC Delta")
+        ax.set_title("Cross-Family Strict Predictive Deltas (5 Seeds/Model)")
+        ax.legend(loc="lower left")
+        ax.set_ylim(min(-0.30, min(geom_mean) - 0.03), max(0.08, max(full_mean) + 0.03))
+
+        for idx, model in enumerate(model_labels):
+            n_runs = int(per_model[model].get("n_runs", 0))
+            ax.text(
+                x[idx],
+                ax.get_ylim()[1] - 0.015,
+                f"n={n_runs}",
+                ha="center",
+                va="top",
+                fontsize=8,
+                color="#1F2937",
+            )
+
+        plt.tight_layout()
+        fig.savefig(output_dir / "fig4_model_replication.pdf")
+        fig.savefig(output_dir / "fig4_model_replication.png")
+        plt.close()
+        logger.info("Saved Figure 4: Hard pivot cross-family replication")
+        return
+
     sweep = results.get("predictive_validity_sweep")
     if sweep:
         aggregate = sweep.get("aggregate", {})
@@ -606,7 +1097,31 @@ def table1_main_results(results: dict, output_dir: Path) -> None:
     # Predictive validity
     lines.append("A. PREDICTIVE VALIDITY (RQ1)")
     lines.append("-" * 50)
-    if "predictive_validity" in results:
+    hard_pivot = results.get("hard_pivot_report", {})
+    pooled = hard_pivot.get("pooled", {})
+    if pooled:
+        geom_mean = float(pooled.get("geometry_minus_baseline_mean", 0.0))
+        geom_ci = pooled.get("geometry_minus_baseline_ci", [0.0, 0.0])
+        geom_pos = int(pooled.get("geometry_positive_runs", 0))
+        full_mean = float(pooled.get("full_minus_baseline_mean", 0.0))
+        full_ci = pooled.get("full_minus_baseline_ci", [0.0, 0.0])
+        full_pos = int(pooled.get("full_positive_runs", 0))
+        total_runs = int(hard_pivot.get("total_runs", 0))
+        verdict = hard_pivot.get("verdicts", {}).get("strict_predictive_gate", "unknown")
+
+        lines.append("  Label source:          REAL stress tests (strict package)")
+        lines.append(
+            "  Geometry-baseline:     "
+            f"{geom_mean:+.3f} (95% CI [{float(geom_ci[0]):+.3f}, {float(geom_ci[1]):+.3f}])"
+        )
+        lines.append(
+            "  Full-baseline:         "
+            f"{full_mean:+.3f} (95% CI [{float(full_ci[0]):+.3f}, {float(full_ci[1]):+.3f}])"
+        )
+        lines.append(f"  Positive geometry runs:{geom_pos}/{total_runs}")
+        lines.append(f"  Positive full runs:    {full_pos}/{total_runs}")
+        lines.append(f"  Strict gate verdict:   {verdict}")
+    elif "predictive_validity" in results:
         pv = results["predictive_validity"]
         mc = pv.get("model_comparison", {})
         use_simulated = pv.get("config", {}).get("use_simulated_failures", False)
@@ -755,6 +1270,65 @@ def table2_flagged_tokens(results: dict, output_dir: Path) -> None:
 
 def table3_model_replication(results: dict, output_dir: Path) -> None:
     """Table 3: Latest predictive-validity results by model."""
+    hard_pivot = results.get("hard_pivot_report", {})
+    per_model = hard_pivot.get("per_model", {})
+    if per_model:
+        lines = []
+        lines.append("=" * 124)
+        lines.append("TABLE 3: Predictive Validity Replication (Hard Pivot, Strict 20-Run Package)")
+        lines.append("=" * 124)
+        lines.append("")
+        lines.append(
+            f"{'Model':<24}{'Runs':<8}{'GeomDelta (95% CI)':<38}"
+            f"{'FullDelta (95% CI)':<38}{'PosGeom':<8}{'PosFull':<8}"
+        )
+        lines.append("-" * 124)
+        for model in sorted(per_model.keys()):
+            row = per_model[model]
+            n_runs = int(row.get("n_runs", 0))
+            g_mean = float(row.get("geometry_minus_baseline_mean", 0.0))
+            g_ci = row.get("geometry_minus_baseline_ci", [0.0, 0.0])
+            g_pos = int(row.get("geometry_positive_runs", 0))
+            f_mean = float(row.get("full_minus_baseline_mean", 0.0))
+            f_ci = row.get("full_minus_baseline_ci", [0.0, 0.0])
+            f_pos = int(row.get("full_positive_runs", 0))
+            g_cell = f"{g_mean:+.3f} [{float(g_ci[0]):+.3f}, {float(g_ci[1]):+.3f}]"
+            f_cell = f"{f_mean:+.3f} [{float(f_ci[0]):+.3f}, {float(f_ci[1]):+.3f}]"
+            lines.append(
+                f"{model:<24}{n_runs:<8}{g_cell:<38}{f_cell:<38}{f'{g_pos}/{n_runs}':<8}{f'{f_pos}/{n_runs}':<8}"
+            )
+
+        pooled = hard_pivot.get("pooled", {})
+        if pooled:
+            total_runs = int(hard_pivot.get("total_runs", 0))
+            g_mean = float(pooled.get("geometry_minus_baseline_mean", 0.0))
+            g_ci = pooled.get("geometry_minus_baseline_ci", [0.0, 0.0])
+            g_pos = int(pooled.get("geometry_positive_runs", 0))
+            f_mean = float(pooled.get("full_minus_baseline_mean", 0.0))
+            f_ci = pooled.get("full_minus_baseline_ci", [0.0, 0.0])
+            f_pos = int(pooled.get("full_positive_runs", 0))
+            g_cell = f"{g_mean:+.3f} [{float(g_ci[0]):+.3f}, {float(g_ci[1]):+.3f}]"
+            f_cell = f"{f_mean:+.3f} [{float(f_ci[0]):+.3f}, {float(f_ci[1]):+.3f}]"
+            lines.append("-" * 124)
+            lines.append(
+                f"{'POOLED':<24}{total_runs:<8}{g_cell:<38}{f_cell:<38}{f'{g_pos}/{total_runs}':<8}{f'{f_pos}/{total_runs}':<8}"
+            )
+
+        lines.append("")
+        lines.append(
+            "Strict gate verdict: "
+            f"{hard_pivot.get('verdicts', {}).get('strict_predictive_gate', 'unknown')}"
+        )
+        lines.append("=" * 124)
+
+        table_text = "\n".join(lines)
+        with (output_dir / "table3_model_replication.txt").open("w") as f:
+            f.write(table_text)
+
+        print(table_text)
+        logger.info("Saved Table 3: Model replication (hard pivot)")
+        return
+
     sweep = results.get("predictive_validity_sweep")
     if sweep:
         aggregate = sweep.get("aggregate", {})
@@ -865,16 +1439,172 @@ def table3_model_replication(results: dict, output_dir: Path) -> None:
     logger.info("Saved Table 3: Model replication")
 
 
+def _collect_generated_outputs(figures_dir: Path) -> list[Path]:
+    generated: list[Path] = []
+    for pattern in ("fig*.svg", "fig*.pdf", "fig*.png", "table*.txt"):
+        generated.extend(sorted(figures_dir.glob(pattern)))
+    return generated
+
+
+def write_publication_manifest(
+    *,
+    repo_root: Path,
+    figures_dir: Path,
+    results: dict,
+    paper_lock_path: Path | None,
+    strict_lock: bool,
+) -> tuple[Path, Path]:
+    results_paths = results.get("_paths", {})
+    source_artifacts = []
+    for name, raw_path in sorted(results_paths.items()):
+        artifact_path = _sanitize_manifest_source_path(str(raw_path))
+        if not artifact_path.is_absolute():
+            artifact_path = (repo_root / artifact_path).resolve()
+
+        exists = artifact_path.exists()
+        source_artifacts.append(
+            {
+                "name": name,
+                "path": str(artifact_path),
+                "exists": exists,
+                "sha256": _file_sha256(artifact_path) if exists else None,
+            }
+        )
+
+    generated_outputs = []
+    for output_path in _collect_generated_outputs(figures_dir):
+        generated_outputs.append(
+            {
+                "path": str(output_path.resolve()),
+                "sha256": _file_sha256(output_path),
+                "size_bytes": output_path.stat().st_size,
+            }
+        )
+
+    manifest = {
+        "manifest_version": 1,
+        "generated_at_utc": datetime.now(timezone.utc).isoformat(),
+        "repo": {
+            "root": str(repo_root),
+            **_git_metadata(repo_root),
+        },
+        "paper_lock": {
+            "path": str(paper_lock_path.resolve()) if paper_lock_path else None,
+            "sha256": (
+                _file_sha256(paper_lock_path.resolve())
+                if paper_lock_path and paper_lock_path.exists()
+                else None
+            ),
+            "strict_lock": strict_lock,
+        },
+        "source_artifacts": source_artifacts,
+        "generated_outputs": generated_outputs,
+        "predictive_protocol_lock": results.get("_predictive_protocol_lock", {}),
+    }
+
+    json_path = figures_dir / "PUBLICATION_MANIFEST.json"
+    md_path = figures_dir / "PUBLICATION_MANIFEST.md"
+    with json_path.open("w", encoding="utf-8") as f:
+        json.dump(manifest, f, indent=2, ensure_ascii=False)
+
+    lines = [
+        "# Publication Manifest",
+        "",
+        f"- Generated at (UTC): `{manifest['generated_at_utc']}`",
+        f"- Git branch: `{manifest['repo']['branch']}`",
+        f"- Git commit: `{manifest['repo']['commit']}`",
+        f"- Git dirty: `{manifest['repo']['is_dirty']}`",
+        f"- Strict lock mode: `{strict_lock}`",
+        "",
+        "## Source Artifacts",
+        "",
+        "| Name | Path | Exists | SHA256 |",
+        "|---|---|---:|---|",
+    ]
+    for row in source_artifacts:
+        lines.append(
+            f"| {row['name']} | `{row['path']}` | "
+            f"{'yes' if row['exists'] else 'no'} | `{row['sha256'] or 'n/a'}` |"
+        )
+    lines.extend(
+        [
+            "",
+            "## Generated Outputs",
+            "",
+            "| Path | Size (bytes) | SHA256 |",
+            "|---|---:|---|",
+        ]
+    )
+    for row in generated_outputs:
+        lines.append(
+            f"| `{row['path']}` | {row['size_bytes']} | `{row['sha256']}` |"
+        )
+    lines.append("")
+    with md_path.open("w", encoding="utf-8") as f:
+        f.write("\n".join(lines))
+
+    logger.info("Saved publication manifest: %s and %s", json_path, md_path)
+    return json_path, md_path
+
+
 def main():
     """Generate all paper figures and tables."""
-    output_dir = Path(__file__).parent.parent / "outputs"
+    parser = argparse.ArgumentParser(
+        description="Generate publication figures/tables from locked DCTT artifacts."
+    )
+    parser.add_argument(
+        "--output-dir",
+        type=Path,
+        default=Path(__file__).parent.parent / "outputs",
+        help="Root output directory containing runs/ and sweeps/ directories.",
+    )
+    parser.add_argument(
+        "--paper-lock",
+        type=Path,
+        default=Path(__file__).parent.parent / "configs" / "paper" / "publication_assets_lock.yaml",
+        help="Path to publication lock YAML.",
+    )
+    parser.add_argument(
+        "--strict-lock",
+        action="store_true",
+        help="Require all lock artifacts to be present and readable.",
+    )
+    parser.add_argument(
+        "--pipeline-spec",
+        type=Path,
+        default=Path(__file__).parent.parent / "figures_src" / "pipeline_diagram_spec.yaml",
+        help="Path to deterministic pipeline diagram spec YAML.",
+    )
+    parser.add_argument(
+        "--skip-manifest",
+        action="store_true",
+        help="Skip publication manifest generation.",
+    )
+    args = parser.parse_args()
+
+    output_dir = args.output_dir.resolve()
     figures_dir = output_dir / "figures"
     figures_dir.mkdir(parents=True, exist_ok=True)
 
     logger.info(f"Output directory: {figures_dir}")
 
-    # Load results
-    results = load_results(output_dir)
+    paper_lock_path = args.paper_lock.resolve()
+    if paper_lock_path.exists():
+        results = load_results_from_paper_lock(
+            output_dir=output_dir,
+            paper_lock_path=paper_lock_path,
+            strict_lock=args.strict_lock,
+        )
+        logger.info("Loaded results using paper lock: %s", paper_lock_path)
+    else:
+        if args.strict_lock:
+            raise RuntimeError(f"Strict lock mode requested but lock not found: {paper_lock_path}")
+        logger.warning(
+            "Paper lock not found (%s). Falling back to heuristic latest-run loading.",
+            paper_lock_path,
+        )
+        results = load_results(output_dir)
+        paper_lock_path = None
 
     if not results:
         logger.warning("No results found. Run experiments first.")
@@ -883,6 +1613,7 @@ def main():
     logger.info(f"Found results for: {list(results.keys())}")
 
     # Generate figures
+    figure0_pipeline_diagram(figures_dir, args.pipeline_spec.resolve())
     figure1_predictive_validity(results, figures_dir)
     figure2_cluster_repair_geometry(results, figures_dir)
     figure3_causal_geometry(results, figures_dir)
@@ -892,6 +1623,15 @@ def main():
     table1_main_results(results, figures_dir)
     table2_flagged_tokens(results, figures_dir)
     table3_model_replication(results, figures_dir)
+
+    if not args.skip_manifest:
+        write_publication_manifest(
+            repo_root=Path(__file__).parent.parent.resolve(),
+            figures_dir=figures_dir,
+            results=results,
+            paper_lock_path=paper_lock_path,
+            strict_lock=args.strict_lock,
+        )
 
     logger.info(f"\nAll figures and tables saved to {figures_dir}")
 

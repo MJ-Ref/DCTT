@@ -1,0 +1,11 @@
+version: 1
+name: hard_pivot_camera_ready_lock
+created_at_utc: "2026-02-24T16:00:00Z"
+notes: "Lock file for deterministic paper assets tied to hard-pivot evidence."
+
+artifacts:
+  diagnostic_results: outputs/runs/2026-01-23/20-33-41/diagnostic_results.json
+  cluster_repair_results: outputs/runs/2026-01-23/23-00-27/cluster_repair_results.json
+  causal_cluster_repair_results: outputs/runs/2026-01-23/23-37-50/causal_cluster_repair_results.json
+  predictive_protocol_lock: outputs/sweeps/predictive_validity/PROTOCOL_LOCK.json
+  hard_pivot_report: outputs/sweeps/predictive_validity/HARD_PIVOT_REPORT.json

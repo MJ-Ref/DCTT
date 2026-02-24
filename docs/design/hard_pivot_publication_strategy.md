@@ -113,3 +113,5 @@ Do not claim:
 3. Rewrite abstract and conclusion to reflect final claim set.
 4. Add a short "registered gate criteria" subsection.
 5. Tag exploratory analyses explicitly as hypothesis-generating.
+6. Generate a publication manifest with source/output hashes and git commit metadata.
+7. Keep diagram source under `figures_src/` and export vector outputs (`.svg`, `.pdf`) by script only.

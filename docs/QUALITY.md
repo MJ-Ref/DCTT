@@ -74,7 +74,7 @@ Current state of DCTT components and what needs improvement.
 | Hardcoded paths in some scripts | experiments/*.py | Low |
 | Missing type hints in repair | src/dctt/repair/ | Low |
 | Duplicate metric computation | census vs validation | Low |
-| Protocol lock is output-local unless versioned in tracked config | outputs/sweeps/* | Medium |
+| Legacy scripts still fall back to latest-run heuristics if lock not provided | scripts/generate_paper_figures.py | Medium |
 
 ## Next Quality Goals
 
@@ -82,3 +82,4 @@ Current state of DCTT components and what needs improvement.
 2. Separate confirmatory negative results from exploratory future predictive work
 3. Define next-generation predictive endpoint before any new GPU sweep
 4. Add type hints to repair module and remove remaining hardcoded paths
+5. Keep `configs/paper/publication_assets_lock.yaml` updated when claim-bearing artifacts change

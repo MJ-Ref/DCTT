@@ -328,6 +328,29 @@ Final pivot artifacts:
 - `docs/design/predictive_negative_reframing.md`
 - `docs/design/hard_pivot_publication_strategy.md`
 
+Camera-ready figures/tables (locked and reproducible):
+
+```bash
+# Uses repo-tracked lock + deterministic diagram spec + manifest hashes
+python scripts/generate_paper_figures.py \
+  --paper-lock configs/paper/publication_assets_lock.yaml \
+  --pipeline-spec figures_src/pipeline_diagram_spec.yaml \
+  --strict-lock
+```
+
+Generated publication assets include:
+- `outputs/figures/fig0_pipeline_diagram.svg`
+- `outputs/figures/fig0_pipeline_diagram.pdf`
+- `outputs/figures/fig1_predictive_validity.pdf`
+- `outputs/figures/fig2_cluster_repair.pdf`
+- `outputs/figures/fig3_causal_geometry.pdf`
+- `outputs/figures/fig4_model_replication.pdf`
+- `outputs/figures/table1_main_results.txt`
+- `outputs/figures/table2_flagged_tokens.txt`
+- `outputs/figures/table3_model_replication.txt`
+- `outputs/figures/PUBLICATION_MANIFEST.json`
+- `outputs/figures/PUBLICATION_MANIFEST.md`
+
 ## Project Status
 
 This is a research codebase under active development. Current status:
