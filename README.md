@@ -264,25 +264,38 @@ Full vocabulary census on 152,064 tokens (3,584 dimensions):
 
 ### Predictive Validity Artifact Status
 
-Latest multi-seed real-label sweep (forced-token minimal-pair, `logprob_choice` scoring):
-- `qwen2_5_coder_7b` (2 seeds, 120 tokens/run): delta mean `-0.005` (positive in 1/2 runs)
-- `qwen2_5_7b` (2 seeds, 120 tokens/run): delta mean `-0.111` (positive in 1/2 runs)
+Latest strict real-label sweep (forced-token minimal-pair, `logprob_choice` scoring, no proxy confounds):
+- `qwen2_5_coder_7b` (3 seeds, 100 tokens/run): delta mean `-0.166` (positive in 0/3 runs)
+- `qwen2_5_7b` (3 seeds, 100 tokens/run): delta mean `-0.248` (positive in 0/3 runs)
 
-Current interpretation: geometry-only signal is unstable and slightly negative on average in real-label runs, so the predictive claim is not yet supported for publication.
+Current interpretation: geometry-only signal is negative under strict confound controls, so the predictive claim is not supported for publication at this time.
 
 Reproduce with:
 
 ```bash
+# Build/update counts vector (one-time per tokenizer/corpus):
+python experiments/build_token_frequency_counts.py \
+  --model-name Qwen/Qwen2.5-Coder-7B \
+  --input-root /path/to/corpus \
+  --output configs/confounds/qwen2_5_coder_7b_repo_counts.npy
+
 python experiments/run_predictive_validity_sweep.py \
   --models qwen2_5_coder_7b,qwen2_5_7b \
-  --seeds 42,43 \
-  --sample-size 120 \
-  --n-prompts 3 \
+  --seeds 70,71,72 \
+  --sample-size 100 \
+  --n-prompts 2 \
+  --max-new-tokens 8 \
+  --n-bootstrap 30 \
   --scoring-mode logprob_choice \
-  --compute-device auto
+  --compute-device cuda \
+  --frequency-counts-path configs/confounds/qwen2_5_coder_7b_repo_counts.npy \
+  --fail-on-proxy-confounds
 
-# For Modal/cloud Linux GPU:
-#   --compute-device cuda
+# Gate decision (PASS/FAIL):
+python scripts/evaluate_predictive_gate.py \
+  --sweep-results outputs/sweeps/predictive_validity/<run_stamp>/sweep_results.json \
+  --output-json outputs/sweeps/predictive_validity/<run_stamp>/gate_evaluation.json \
+  --output-markdown outputs/sweeps/predictive_validity/<run_stamp>/gate_evaluation.md
 ```
 
 ## Project Status

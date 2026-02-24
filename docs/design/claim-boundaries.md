@@ -30,8 +30,8 @@ What DCTT can and cannot claim based on current evidence.
 ### 1. "Geometry metrics predict token-level failures beyond frequency/type confounds"
 
 **Why not:**
-- Multi-seed real-label sweep on qwen2_5_coder_7b: delta mean -0.005 (1/2 runs positive)
-- Multi-seed real-label sweep on qwen2_5_7b: delta mean -0.111 (1/2 runs positive)
+- Strict real-label sweep on qwen2_5_coder_7b: delta mean -0.166 (0/3 runs positive)
+- Strict real-label sweep on qwen2_5_7b: delta mean -0.248 (0/3 runs positive)
 - Geometry-only performance is unstable and negative on average
 
 **What's needed:**

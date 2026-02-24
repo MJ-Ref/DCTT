@@ -207,11 +207,13 @@ def _load_frequency_counts(
     *,
     path: Path,
     vocab_size: int,
+    allow_length_mismatch: bool = True,
 ) -> np.ndarray | None:
     """Load token frequency counts vector from supported formats.
 
     Supported:
-    - `.npy`: dense vector with length near vocab_size (auto pad/truncate)
+    - `.npy`: dense vector with length == vocab_size (or auto pad/truncate
+      when allow_length_mismatch=True)
     - `.json`: dict/list payload. Accepted forms:
       - {"counts": [..]}
       - {"counts": {"<token_id>": count, ...}}
@@ -236,6 +238,15 @@ def _load_frequency_counts(
             n_target = int(vocab_size)
             if n_current == n_target:
                 return clipped
+            if not allow_length_mismatch:
+                logger.warning(
+                    "Frequency vector length %d does not match vocab size %d at %s; "
+                    "strict alignment is enabled so this file is rejected.",
+                    n_current,
+                    n_target,
+                    path,
+                )
+                return None
             if n_current < n_target:
                 logger.warning(
                     "Frequency vector length %d < vocab size %d at %s; padding trailing zeros.",
@@ -694,6 +705,12 @@ def main(cfg: DictConfig) -> None:
         fail_on_proxy_confounds = bool(
             predictive_cfg.get("fail_on_proxy_confounds", False)
         )
+        strict_frequency_alignment = bool(
+            predictive_cfg.get("strict_frequency_alignment", True)
+        )
+        if fail_on_proxy_confounds:
+            # Publication-mode runs must not silently remap frequency vectors.
+            strict_frequency_alignment = True
 
         # Resolve norm confound source
         norm_source = "cached_raw_norms"
@@ -717,7 +734,11 @@ def main(cfg: DictConfig) -> None:
         resolved_frequency_path: str | None = None
         if frequency_counts_path:
             candidate = _resolve_path(repo_root, str(frequency_counts_path))
-            loaded = _load_frequency_counts(path=candidate, vocab_size=int(vocab_size))
+            loaded = _load_frequency_counts(
+                path=candidate,
+                vocab_size=int(vocab_size),
+                allow_length_mismatch=not strict_frequency_alignment,
+            )
             if loaded is not None:
                 frequency_values = loaded
                 frequency_source = "corpus_counts"
@@ -732,7 +753,8 @@ def main(cfg: DictConfig) -> None:
             if fail_on_proxy_confounds:
                 raise RuntimeError(
                     "Token frequency counts unavailable for confound controls. "
-                    "Provide predictive_validity.token_frequency_counts_path."
+                    "Provide predictive_validity.token_frequency_counts_path with "
+                    "vocab-aligned counts when strict_frequency_alignment=true."
                 )
             frequency_values = 1.0 / (np.arange(int(vocab_size), dtype=np.float64) + 1.0)
             logger.warning(
@@ -953,6 +975,7 @@ def main(cfg: DictConfig) -> None:
                 "frequency_counts_path": resolved_frequency_path,
                 "norm_confound_source": norm_source,
                 "fail_on_proxy_confounds": fail_on_proxy_confounds,
+                "strict_frequency_alignment": strict_frequency_alignment,
                 "strict_evaluation": bool(
                     cfg.get("predictive_validity", {}).get("strict_evaluation", True)
                 ),

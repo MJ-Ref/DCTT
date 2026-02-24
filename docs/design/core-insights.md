@@ -52,9 +52,9 @@ Initial concern: Maybe severity just correlates with token frequency or type.
 - Embedding norm
 - Simple density (mean kNN distance)
 
-Latest multi-seed sweep (2 seeds/model, 120 tokens/run, logprob-choice scoring):
-- qwen2_5_coder_7b: delta mean -0.005 (1/2 runs positive)
-- qwen2_5_7b: delta mean -0.111 (1/2 runs positive)
+Latest strict multi-seed sweep (3 seeds/model, 100 tokens/run, logprob-choice scoring, no proxy confounds):
+- qwen2_5_coder_7b: delta mean -0.166 (0/3 runs positive)
+- qwen2_5_7b: delta mean -0.248 (0/3 runs positive)
 
 **Interpretation:** Pipeline and stress tests execute end-to-end with real labels, but geometry signal is currently unstable and not stronger than confound baselines in aggregate.
 

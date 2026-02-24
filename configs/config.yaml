@@ -59,6 +59,7 @@ predictive_validity:
   strict_evaluation: true  # Raise on evaluator failures instead of silent fallback
   token_frequency_counts_path: null  # Optional .npy/.json token counts for real frequency confounds
   fail_on_proxy_confounds: false  # If true, fail when frequency/norm proxies are used
+  strict_frequency_alignment: true  # Require exact counts-vocab alignment in publication-mode runs
 
 # Repair settings
 repair:

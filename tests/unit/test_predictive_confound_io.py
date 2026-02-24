@@ -46,7 +46,7 @@ def test_load_frequency_counts_short_json_list_pads_zeros(tmp_path: Path) -> Non
     path = tmp_path / "counts.json"
     path.write_text(json.dumps({"counts": [1, 2]}))
 
-    loaded = _load_frequency_counts(path=path, vocab_size=3)
+    loaded = _load_frequency_counts(path=path, vocab_size=3, allow_length_mismatch=True)
     assert loaded is not None
     assert np.allclose(loaded, np.array([1.0, 2.0, 0.0]))
 
@@ -55,9 +55,17 @@ def test_load_frequency_counts_long_npy_truncates(tmp_path: Path) -> None:
     path = tmp_path / "counts.npy"
     np.save(path, np.array([9, 8, 7, 6], dtype=np.int64))
 
-    loaded = _load_frequency_counts(path=path, vocab_size=2)
+    loaded = _load_frequency_counts(path=path, vocab_size=2, allow_length_mismatch=True)
     assert loaded is not None
     assert np.allclose(loaded, np.array([9.0, 8.0]))
+
+
+def test_load_frequency_counts_mismatch_rejected_when_strict(tmp_path: Path) -> None:
+    path = tmp_path / "counts.npy"
+    np.save(path, np.array([1, 2], dtype=np.int64))
+
+    loaded = _load_frequency_counts(path=path, vocab_size=3, allow_length_mismatch=False)
+    assert loaded is None
 
 
 def test_save_and_load_cached_norms(tmp_path: Path) -> None:

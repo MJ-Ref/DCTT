@@ -15,10 +15,10 @@ Current state of DCTT components and what needs improvement.
 | Single-token repair | C | Works but doesn't improve geometry |
 | Cluster repair | A | Key breakthrough, validated |
 | Stress tests | B | Forced-token minimal-pair design implemented |
-| Predictive validity | B | Multi-seed real-label sweeps complete; signal weak/unstable |
+| Predictive validity | B- | Strict multi-seed real-label sweeps negative vs confound baselines |
 | Causal framework | B | Mechanistic OK, behavioral incomplete |
 | Documentation | B+ | Good coverage, could use more examples |
-| Test coverage | B+ | 50 tests including integration smoke coverage |
+| Test coverage | A- | 66 tests including integration smoke coverage |
 
 ## What's Working Well
 
@@ -43,9 +43,9 @@ Current state of DCTT components and what needs improvement.
 ## What Needs Work
 
 ### Predictive Validity Signal (Priority: High)
-**Problem:** In real-label runs, geometry-only underperforms confound baselines
+**Problem:** In strict real-label runs, geometry-only underperforms confound baselines across both tested models
 **Impact:** RQ1 claim is not yet publication-strength
-**Solution:** Increase sample size/seeds further, improve behavioral labels, and test stronger metrics/features
+**Solution:** Run a gated rescue sprint (higher power + calibrated scoring) and pivot claim language if gate fails
 
 ### Causal Behavioral Evidence (Priority: High)
 **Problem:** DiD not significant, outcomes simulated
@@ -74,11 +74,11 @@ Current state of DCTT components and what needs improvement.
 | Hardcoded paths in some scripts | experiments/*.py | Low |
 | Missing type hints in repair | src/dctt/repair/ | Low |
 | Duplicate metric computation | census vs validation | Low |
-| Stress tests rely on exact-match generation checks (no logprob scoring) | src/dctt/stress_tests/ | Medium |
+| Protocol lock is output-local unless versioned in tracked config | outputs/sweeps/* | Medium |
 
 ## Next Quality Goals
 
-1. Expand real-label predictive runs (larger n, more prompts, more seeds)
+1. Execute predictive rescue gate (`configs/experiment/predictive_rescue.yaml` + `scripts/evaluate_predictive_gate.py`)
 2. Add cross-family replication (Llama/Mistral class models)
-3. Strengthen stress-test scoring with forced-choice/logprob margins
+3. Tune stress-test scoring with model-specific forced-choice/logprob margins
 4. Add type hints to repair module and remove remaining hardcoded paths

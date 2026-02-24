@@ -1,0 +1,35 @@
+# Predictive Rescue Sprint (go/no-go)
+name: "predictive_rescue"
+description: "High-power predictive-validity replication with strict confound controls"
+
+# Sweep budget recommendations
+sweep:
+  models:
+    - qwen2_5_coder_7b
+    - qwen2_5_7b
+  seeds:
+    - 80
+    - 81
+    - 82
+    - 83
+    - 84
+  sample_size: 300
+  n_prompts: 6
+  max_new_tokens: 8
+  n_bootstrap: 100
+  scoring_mode: "logprob_choice"
+  min_logprob_margin: 0.0
+  compute_device: "cuda"
+
+# Confound integrity (publication-mode)
+confounds:
+  token_frequency_counts_path: "configs/confounds/qwen2_5_coder_7b_repo_counts.npy"
+  fail_on_proxy_confounds: true
+  strict_frequency_alignment: true
+
+# Decision gate for whether to continue predictive-claim work
+gate:
+  confidence_level: 0.95
+  min_runs_per_model: 5
+  require_positive_delta_per_model: true
+  require_positive_pooled_delta: true
