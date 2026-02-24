@@ -64,11 +64,17 @@ Verification covers:
 2. Claim check consistency against `HARD_PIVOT_REPORT.json`.
 3. Internal hash consistency of `PUBLICATION_MANIFEST.json`.
 
+One-command freeze (regenerate + refresh lock hashes + verify):
+
+```bash
+python scripts/freeze_submission_package.py
+```
+
 ## E) Release Candidate Procedure
 
 1. Ensure verification passes.
 2. Commit and push manuscript/docs/code updates.
 3. Create annotated tag:
-   - `git tag -a submission-rc1 -m "Hard pivot submission candidate"`
-   - `git push origin submission-rc1`
+   - `git tag -a submission-rcN -m "Hard pivot submission candidate"`
+   - `git push origin submission-rcN`
 4. Freeze claim-bearing files in lock and avoid edits after tag.

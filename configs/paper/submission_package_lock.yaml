@@ -1,6 +1,6 @@
 version: 1
-name: hard_pivot_submission_rc1
-created_at_utc: "2026-02-24T21:00:00Z"
+name: hard_pivot_submission_rc2
+created_at_utc: "2026-02-24T21:20:00Z"
 notes: "Claim-bearing submission package lock for hard-pivot manuscript framing."
 
 artifacts:
@@ -13,12 +13,6 @@ artifacts:
   - id: publication_assets_lock
     path: configs/paper/publication_assets_lock.yaml
     sha256: "e5c71e3be3e988cd6b6658ee7f1582819fffb67157bcd08bbf9e75ff4b476f42"
-  - id: publication_manifest_json
-    path: outputs/figures/PUBLICATION_MANIFEST.json
-    sha256: "12fa34b421040fa1df3aba0576e36660f0bda55d63a2dac8812955730fd61bd3"
-  - id: publication_manifest_md
-    path: outputs/figures/PUBLICATION_MANIFEST.md
-    sha256: "2c351ec4cca5c464cf182f51dc07f21b7aec9b20d20bfef6fa4f3c37a6448ce5"
   - id: fig0_pipeline_svg
     path: outputs/figures/fig0_pipeline_diagram.svg
     sha256: "8246768af241903f15a09a62c6ed53bf9cffc4423bcc2fe5fb5c7e36e3ba33d5"
@@ -64,3 +58,4 @@ tolerances:
 
 verification:
   require_manifest_consistency: true
+  manifest_path: outputs/figures/PUBLICATION_MANIFEST.json

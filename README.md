@@ -358,6 +358,12 @@ python scripts/verify_submission_package.py \
   --lock configs/paper/submission_package_lock.yaml
 ```
 
+Freeze submission package (regenerate + hash refresh + verify):
+
+```bash
+python scripts/freeze_submission_package.py
+```
+
 ## Project Status
 
 This is a research codebase under active development. Current status:

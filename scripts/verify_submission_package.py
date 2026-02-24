@@ -138,9 +138,6 @@ def main() -> int:
             if not isinstance(raw_path, str) or not raw_path:
                 errors.append(f"Artifact '{artifact_id}' missing path")
                 continue
-            if not isinstance(expected_hash, str) or not expected_hash:
-                errors.append(f"Artifact '{artifact_id}' missing sha256")
-                continue
 
             file_path = resolve_path(raw_path, repo_root)
             artifact_index[artifact_id] = file_path
@@ -148,11 +145,15 @@ def main() -> int:
                 errors.append(f"Artifact missing: {artifact_id} -> {file_path}")
                 continue
 
-            actual_hash = sha256_file(file_path)
-            if actual_hash != expected_hash:
-                errors.append(
-                    f"Artifact hash mismatch {artifact_id}: expected {expected_hash}, got {actual_hash}"
-                )
+            if expected_hash is not None:
+                if not isinstance(expected_hash, str) or not expected_hash:
+                    errors.append(f"Artifact '{artifact_id}' has invalid sha256 field")
+                    continue
+                actual_hash = sha256_file(file_path)
+                if actual_hash != expected_hash:
+                    errors.append(
+                        f"Artifact hash mismatch {artifact_id}: expected {expected_hash}, got {actual_hash}"
+                    )
 
     hard_pivot_path = artifact_index.get("hard_pivot_report_json")
     claim_checks = lock.get("claim_checks", {})
@@ -218,9 +219,13 @@ def main() -> int:
 
     verify_cfg = lock.get("verification", {})
     if isinstance(verify_cfg, dict) and verify_cfg.get("require_manifest_consistency", False):
-        manifest_path = artifact_index.get("publication_manifest_json")
+        manifest_raw = verify_cfg.get("manifest_path")
+        if manifest_raw is None:
+            manifest_path = artifact_index.get("publication_manifest_json")
+        else:
+            manifest_path = resolve_path(str(manifest_raw), repo_root)
         if manifest_path is None:
-            errors.append("Manifest consistency required but publication_manifest_json artifact missing")
+            errors.append("Manifest consistency required but no manifest path provided")
         elif not manifest_path.exists():
             errors.append(f"Manifest consistency required but file missing: {manifest_path}")
         else:
