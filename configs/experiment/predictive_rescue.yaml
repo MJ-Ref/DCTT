@@ -23,7 +23,7 @@ sweep:
 
 # Confound integrity (publication-mode)
 confounds:
-  token_frequency_counts_path: "configs/confounds/qwen2_5_coder_7b_repo_counts.npy"
+  token_frequency_counts_path: "configs/confounds/qwen2_5_coder_7b_repo_counts_aligned.npy"
   fail_on_proxy_confounds: true
   strict_frequency_alignment: true
 

@@ -1,0 +1,12 @@
+{
+  "model_name": "mistralai/Mistral-7B-v0.3",
+  "revision": "main",
+  "input_root": "/Users/mj/Documents/DCTT",
+  "n_files": 8000,
+  "total_chars": 155746876,
+  "total_tokens": 54561640,
+  "tokenizer_vocab_size": 32768,
+  "output_vocab_size": 32768,
+  "target_vocab_size_arg": null,
+  "output_path": "/Users/mj/Documents/DCTT/configs/confounds/mistral_7b_repo_counts.npy"
+}

@@ -55,8 +55,12 @@ Initial concern: Maybe severity just correlates with token frequency or type.
 Latest strict multi-seed sweep (3 seeds/model, 100 tokens/run, logprob-choice scoring, no proxy confounds):
 - qwen2_5_coder_7b: delta mean -0.166 (0/3 runs positive)
 - qwen2_5_7b: delta mean -0.248 (0/3 runs positive)
+- mistral_7b pilot (2 seeds): delta mean -0.053
+- tinyllama_1_1b pilot (2 seeds): delta mean -0.101
 
 **Interpretation:** Pipeline and stress tests execute end-to-end with real labels, but geometry signal is currently unstable and not stronger than confound baselines in aggregate.
+
+If full-power rescue remains negative, use `docs/design/predictive_negative_reframing.md` for manuscript claim pivot language.
 
 ## 4. Mechanistic vs Behavioral Evidence
 

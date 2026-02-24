@@ -1,0 +1,34 @@
+# Cross-family Predictive Rescue (full-power)
+name: "cross_family_predictive_rescue"
+description: "5-seed strict predictive-validity replication across non-Qwen model families"
+
+# Shared sweep settings
+common:
+  seeds:
+    - 95
+    - 96
+    - 97
+    - 98
+    - 99
+  sample_size: 300
+  n_prompts: 6
+  max_new_tokens: 8
+  n_bootstrap: 100
+  scoring_mode: "logprob_choice"
+  min_logprob_margin: 0.0
+  compute_device: "cuda"
+  fail_on_proxy_confounds: true
+
+# Launch each model as an isolated modal sweep so confound counts stay vocab-aligned.
+jobs:
+  - model: "mistral_7b"
+    frequency_counts_path: "configs/confounds/mistral_7b_repo_counts.npy"
+  - model: "tinyllama_1_1b"
+    frequency_counts_path: "configs/confounds/tinyllama_1_1b_repo_counts.npy"
+
+# Gate defaults for each completed sweep
+gate:
+  confidence_level: 0.95
+  min_runs_per_model: 5
+  require_positive_delta_per_model: true
+  require_positive_pooled_delta: true

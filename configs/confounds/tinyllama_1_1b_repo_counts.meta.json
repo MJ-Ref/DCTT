@@ -1,0 +1,12 @@
+{
+  "model_name": "TinyLlama/TinyLlama-1.1B-Chat-v1.0",
+  "revision": "main",
+  "input_root": "/Users/mj/Documents/DCTT",
+  "n_files": 8000,
+  "total_chars": 155746876,
+  "total_tokens": 55531971,
+  "tokenizer_vocab_size": 32000,
+  "output_vocab_size": 32000,
+  "target_vocab_size_arg": null,
+  "output_path": "/Users/mj/Documents/DCTT/configs/confounds/tinyllama_1_1b_repo_counts.npy"
+}

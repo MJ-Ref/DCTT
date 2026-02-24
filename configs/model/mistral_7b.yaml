@@ -1,0 +1,21 @@
+# Mistral-7B-v0.3 Model Configuration (Cross-family replication)
+name: "mistralai/Mistral-7B-v0.3"
+revision: "main"
+family: "mistral"
+
+# Embedding extraction
+embedding_source: "model.embed_tokens.weight"
+embedding_dim: 4096
+vocab_size: 32768
+
+# Model loading
+torch_dtype: "bfloat16"
+trust_remote_code: false
+low_cpu_mem_usage: true
+
+use_mlx: false
+
+# Tokenizer
+tokenizer:
+  trust_remote_code: false
+  use_fast: true

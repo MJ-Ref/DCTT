@@ -32,11 +32,13 @@ What DCTT can and cannot claim based on current evidence.
 **Why not:**
 - Strict real-label sweep on qwen2_5_coder_7b: delta mean -0.166 (0/3 runs positive)
 - Strict real-label sweep on qwen2_5_7b: delta mean -0.248 (0/3 runs positive)
+- Cross-family pilot on mistral_7b: delta mean -0.053 (2 seeds, gate FAIL)
+- Cross-family pilot on tinyllama_1_1b: delta mean -0.101 (2 seeds, gate FAIL)
 - Geometry-only performance is unstable and negative on average
 
 **What's needed:**
 - Larger real-label sample sizes and stress-test budgets
-- Cross-seed replication
+- Cross-seed replication at higher power (5+ seeds/model)
 - Stronger token-failure labels (e.g., forced-choice/logprob margins)
 
 ### 2. "Repair causally improves downstream code/math behavior"
@@ -89,3 +91,8 @@ What DCTT can and cannot claim based on current evidence.
 - "Repair fixes token failures" (behavioral not shown)
 - "Geometry causes failures" (correlation, not demonstrated causation)
 - "This works for all LLMs" (only tested one model)
+
+## Fail-Case Manuscript Plan
+
+If the strict predictive gate remains negative after the rescue sweep, use:
+- `docs/design/predictive_negative_reframing.md`

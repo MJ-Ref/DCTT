@@ -58,6 +58,15 @@ def main() -> None:
         default=200_000,
         help="Clip each file to this many chars to bound runtime.",
     )
+    parser.add_argument(
+        "--target-vocab-size",
+        type=int,
+        default=None,
+        help=(
+            "Optional output length override. If larger than tokenizer vocab, "
+            "counts are zero-padded; if smaller, counts are truncated."
+        ),
+    )
     args = parser.parse_args()
 
     input_root = Path(args.input_root).expanduser().resolve()
@@ -74,8 +83,15 @@ def main() -> None:
         revision=args.revision,
         trust_remote_code=True,
     )
-    vocab_size = int(tokenizer.vocab_size)
-    counts = np.zeros(vocab_size, dtype=np.int64)
+    tokenizer_vocab_size = int(tokenizer.vocab_size)
+    output_vocab_size = (
+        int(args.target_vocab_size)
+        if args.target_vocab_size is not None
+        else tokenizer_vocab_size
+    )
+    if output_vocab_size <= 0:
+        raise ValueError(f"Invalid target vocab size: {output_vocab_size}")
+    counts = np.zeros(output_vocab_size, dtype=np.int64)
 
     files = _iter_files(input_root, max_files=int(args.max_files))
     if not files:
@@ -99,8 +115,13 @@ def main() -> None:
         if not token_ids:
             continue
 
-        bincount = np.bincount(token_ids, minlength=vocab_size)
-        counts += bincount.astype(np.int64)
+        bincount = np.bincount(token_ids, minlength=tokenizer_vocab_size).astype(np.int64)
+        if output_vocab_size == tokenizer_vocab_size:
+            counts += bincount
+        elif output_vocab_size > tokenizer_vocab_size:
+            counts[:tokenizer_vocab_size] += bincount
+        else:
+            counts += bincount[:output_vocab_size]
         total_chars += len(text)
         total_tokens += int(len(token_ids))
 
@@ -113,7 +134,13 @@ def main() -> None:
         "n_files": len(files),
         "total_chars": int(total_chars),
         "total_tokens": int(total_tokens),
-        "vocab_size": int(vocab_size),
+        "tokenizer_vocab_size": int(tokenizer_vocab_size),
+        "output_vocab_size": int(output_vocab_size),
+        "target_vocab_size_arg": (
+            int(args.target_vocab_size)
+            if args.target_vocab_size is not None
+            else None
+        ),
         "output_path": str(output_path),
     }
     with meta_path.open("w") as f:

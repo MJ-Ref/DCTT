@@ -15,7 +15,7 @@ Current state of DCTT components and what needs improvement.
 | Single-token repair | C | Works but doesn't improve geometry |
 | Cluster repair | A | Key breakthrough, validated |
 | Stress tests | B | Forced-token minimal-pair design implemented |
-| Predictive validity | B- | Strict multi-seed real-label sweeps negative vs confound baselines |
+| Predictive validity | B- | Strict multi-seed real-label sweeps remain negative vs confound baselines |
 | Causal framework | B | Mechanistic OK, behavioral incomplete |
 | Documentation | B+ | Good coverage, could use more examples |
 | Test coverage | A- | 66 tests including integration smoke coverage |
@@ -53,9 +53,9 @@ Current state of DCTT components and what needs improvement.
 **Solution:** Real model inference with embedding injection
 
 ### Multi-Model Validation (Priority: Medium)
-**Problem:** Replicated across seeds on two Qwen models, but no cross-family validation
-**Impact:** Results may not generalize
-**Solution:** Run on Llama, Mistral
+**Problem:** Cross-family pilot exists (Mistral/TinyLlama) but is low-power (2 seeds/model)
+**Impact:** Direction is informative (negative), uncertainty remains high
+**Solution:** Run full-power 5-seed cross-family rescue config
 
 ### Confound Matching (Priority: Medium)
 **Problem:** Matching on (tier, type) only, not continuous
@@ -78,7 +78,7 @@ Current state of DCTT components and what needs improvement.
 
 ## Next Quality Goals
 
-1. Execute predictive rescue gate (`configs/experiment/predictive_rescue.yaml` + `scripts/evaluate_predictive_gate.py`)
-2. Add cross-family replication (Llama/Mistral class models)
+1. Complete strict rescue sweep and finalize artifacts (`scripts/finalize_modal_predictive_sweep.py`)
+2. Execute full-power cross-family rescue (`configs/experiment/cross_family_rescue.yaml` + `scripts/launch_cross_family_rescue.py`)
 3. Tune stress-test scoring with model-specific forced-choice/logprob margins
 4. Add type hints to repair module and remove remaining hardcoded paths

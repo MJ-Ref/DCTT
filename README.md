@@ -268,16 +268,22 @@ Latest strict real-label sweep (forced-token minimal-pair, `logprob_choice` scor
 - `qwen2_5_coder_7b` (3 seeds, 100 tokens/run): delta mean `-0.166` (positive in 0/3 runs)
 - `qwen2_5_7b` (3 seeds, 100 tokens/run): delta mean `-0.248` (positive in 0/3 runs)
 
+Cross-family pilot (2 seeds/model, strict no-proxy setup):
+- `mistral_7b`: delta mean `-0.053` (gate `FAIL`)
+- `tinyllama_1_1b`: delta mean `-0.101` (gate `FAIL`)
+
 Current interpretation: geometry-only signal is negative under strict confound controls, so the predictive claim is not supported for publication at this time.
 
 Reproduce with:
 
 ```bash
-# Build/update counts vector (one-time per tokenizer/corpus):
+# Build/update counts vector (one-time per tokenizer/corpus).
+# For Qwen strict runs, align to model output vocab size:
 python experiments/build_token_frequency_counts.py \
   --model-name Qwen/Qwen2.5-Coder-7B \
   --input-root /path/to/corpus \
-  --output configs/confounds/qwen2_5_coder_7b_repo_counts.npy
+  --output configs/confounds/qwen2_5_coder_7b_repo_counts_aligned.npy \
+  --target-vocab-size 152064
 
 python experiments/run_predictive_validity_sweep.py \
   --models qwen2_5_coder_7b,qwen2_5_7b \
@@ -288,7 +294,7 @@ python experiments/run_predictive_validity_sweep.py \
   --n-bootstrap 30 \
   --scoring-mode logprob_choice \
   --compute-device cuda \
-  --frequency-counts-path configs/confounds/qwen2_5_coder_7b_repo_counts.npy \
+  --frequency-counts-path configs/confounds/qwen2_5_coder_7b_repo_counts_aligned.npy \
   --fail-on-proxy-confounds
 
 # Gate decision (PASS/FAIL):
@@ -296,6 +302,16 @@ python scripts/evaluate_predictive_gate.py \
   --sweep-results outputs/sweeps/predictive_validity/<run_stamp>/sweep_results.json \
   --output-json outputs/sweeps/predictive_validity/<run_stamp>/gate_evaluation.json \
   --output-markdown outputs/sweeps/predictive_validity/<run_stamp>/gate_evaluation.md
+
+# Full-power cross-family rescue launcher (5 seeds/model, per-model confound files):
+python scripts/launch_cross_family_rescue.py \
+  --config configs/experiment/cross_family_rescue.yaml
+
+# Wait/pull/finalize modal sweep artifacts once a stamp is known:
+python scripts/finalize_modal_predictive_sweep.py \
+  --stamp <run_stamp> \
+  --wait \
+  --min-runs-per-model 5
 ```
 
 ## Project Status
@@ -318,8 +334,9 @@ This is a research codebase under active development. Current status:
 - [x] Forced-token minimal-pair stress tests
 - [x] Predictive-validity analysis pipeline (real-label runs complete)
 - [x] **Causal experiment framework** (mechanistic claim validated)
+- [x] Cross-family pilot replication (Mistral, TinyLlama; strict negative)
 - [ ] Causal behavioral evidence (needs real stress tests)
-- [ ] Cross-family multi-model comparison (Llama, Mistral)
+- [ ] Full-power cross-family rescue sweep (5 seeds/model)
 
 ## Citation
 
