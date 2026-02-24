@@ -15,7 +15,7 @@ Current state of DCTT components and what needs improvement.
 | Single-token repair | C | Works but doesn't improve geometry |
 | Cluster repair | A | Key breakthrough, validated |
 | Stress tests | B | Forced-token minimal-pair design implemented |
-| Predictive validity | B- | Strict multi-seed real-label sweeps remain negative vs confound baselines |
+| Predictive validity | B- | Final strict 20-run package is negative vs confound baselines |
 | Causal framework | B | Mechanistic OK, behavioral incomplete |
 | Documentation | B+ | Good coverage, could use more examples |
 | Test coverage | A- | 66 tests including integration smoke coverage |
@@ -43,9 +43,9 @@ Current state of DCTT components and what needs improvement.
 ## What Needs Work
 
 ### Predictive Validity Signal (Priority: High)
-**Problem:** In strict real-label runs, geometry-only underperforms confound baselines across both tested models
-**Impact:** RQ1 claim is not yet publication-strength
-**Solution:** Run a gated rescue sprint (higher power + calibrated scoring) and pivot claim language if gate fails
+**Problem:** In the finalized strict package (20 runs, 4 models), geometry-only underperforms confound baselines
+**Impact:** Positive predictive claim is falsified for the current endpoint/protocol
+**Solution:** Hard-pivot manuscript framing to mechanistic-positive + rigorous negative predictive result
 
 ### Causal Behavioral Evidence (Priority: High)
 **Problem:** DiD not significant, outcomes simulated
@@ -53,9 +53,9 @@ Current state of DCTT components and what needs improvement.
 **Solution:** Real model inference with embedding injection
 
 ### Multi-Model Validation (Priority: Medium)
-**Problem:** Cross-family pilot exists (Mistral/TinyLlama) but is low-power (2 seeds/model)
-**Impact:** Direction is informative (negative), uncertainty remains high
-**Solution:** Run full-power 5-seed cross-family rescue config
+**Problem:** Cross-family 5-seed runs are complete and still negative
+**Impact:** Negative predictive finding is robust across tested model families
+**Solution:** Stop repeated runs of same endpoint; move effort to endpoint redesign if predictive line is revisited
 
 ### Confound Matching (Priority: Medium)
 **Problem:** Matching on (tier, type) only, not continuous
@@ -78,7 +78,7 @@ Current state of DCTT components and what needs improvement.
 
 ## Next Quality Goals
 
-1. Complete strict rescue sweep and finalize artifacts (`scripts/finalize_modal_predictive_sweep.py`)
-2. Execute full-power cross-family rescue (`configs/experiment/cross_family_rescue.yaml` + `scripts/launch_cross_family_rescue.py`)
-3. Tune stress-test scoring with model-specific forced-choice/logprob margins
+1. Complete manuscript hard pivot using `outputs/sweeps/predictive_validity/HARD_PIVOT_REPORT.md`
+2. Separate confirmatory negative results from exploratory future predictive work
+3. Define next-generation predictive endpoint before any new GPU sweep
 4. Add type hints to repair module and remove remaining hardcoded paths

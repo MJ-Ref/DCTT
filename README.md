@@ -264,15 +264,20 @@ Full vocabulary census on 152,064 tokens (3,584 dimensions):
 
 ### Predictive Validity Artifact Status
 
-Latest strict real-label sweep (forced-token minimal-pair, `logprob_choice` scoring, no proxy confounds):
-- `qwen2_5_coder_7b` (3 seeds, 100 tokens/run): delta mean `-0.166` (positive in 0/3 runs)
-- `qwen2_5_7b` (3 seeds, 100 tokens/run): delta mean `-0.248` (positive in 0/3 runs)
+Final strict real-label package (forced-token minimal-pair, `logprob_choice`, no proxy confounds):
+- Sweeps: `2026-02-24_06-43-58`, `2026-02-24_07-31-10`, `2026-02-24_07-34-45`
+- Total runs: `20` (4 models x 5 seeds/model)
+- Strict gate verdict: `FAIL`
+- Pooled geometry-minus-baseline delta: `-0.128153` (95% CI `[-0.168367, -0.087938]`, positive `1/20`)
+- Pooled full-minus-baseline delta: `-0.011735` (95% CI `[-0.023119, -0.000351]`, positive `4/20`)
 
-Cross-family pilot (2 seeds/model, strict no-proxy setup):
-- `mistral_7b`: delta mean `-0.053` (gate `FAIL`)
-- `tinyllama_1_1b`: delta mean `-0.101` (gate `FAIL`)
+Per-model geometry-minus-baseline delta means:
+- `qwen2_5_coder_7b`: `-0.211062` (5 seeds, positive `0/5`)
+- `qwen2_5_7b`: `-0.164317` (5 seeds, positive `0/5`)
+- `mistral_7b`: `-0.073882` (5 seeds, positive `0/5`)
+- `tinyllama_1_1b`: `-0.063350` (5 seeds, positive `1/5`)
 
-Current interpretation: geometry-only signal is negative under strict confound controls, so the predictive claim is not supported for publication at this time.
+Current interpretation: under strict controls, geometry-only predictive signal is consistently negative versus confound baselines. The predictive claim is retired; the project pivots to mechanistic intervention + rigorous negative predictive evidence.
 
 Reproduce with:
 
@@ -312,7 +317,16 @@ python scripts/finalize_modal_predictive_sweep.py \
   --stamp <run_stamp> \
   --wait \
   --min-runs-per-model 5
+
+# Build consolidated hard-pivot evidence report from finalized sweeps:
+python scripts/build_hard_pivot_report.py
 ```
+
+Final pivot artifacts:
+- `outputs/sweeps/predictive_validity/HARD_PIVOT_REPORT.json`
+- `outputs/sweeps/predictive_validity/HARD_PIVOT_REPORT.md`
+- `docs/design/predictive_negative_reframing.md`
+- `docs/design/hard_pivot_publication_strategy.md`
 
 ## Project Status
 
@@ -334,9 +348,10 @@ This is a research codebase under active development. Current status:
 - [x] Forced-token minimal-pair stress tests
 - [x] Predictive-validity analysis pipeline (real-label runs complete)
 - [x] **Causal experiment framework** (mechanistic claim validated)
-- [x] Cross-family pilot replication (Mistral, TinyLlama; strict negative)
+- [x] Cross-family replication (Mistral, TinyLlama; strict negative)
+- [x] Full-power cross-family rescue sweep (5 seeds/model; strict negative)
+- [x] Hard pivot evidence report (20-run strict aggregate)
 - [ ] Causal behavioral evidence (needs real stress tests)
-- [ ] Full-power cross-family rescue sweep (5 seeds/model)
 
 ## Citation
 

@@ -1,6 +1,6 @@
 # Manuscript Reframing If Predictive Gate Fails Again
 
-Use this framing if the strict predictive gate remains `FAIL` after the current rescue sweep.
+Use this framing now that the strict predictive gate is `FAIL` after the finalized rescue package.
 
 ## Positioning Shift
 
@@ -11,6 +11,9 @@ To:
 - "Under strict controls, geometry-only predictors do not outperform confound baselines, while cluster-level geometric interventions produce robust mechanistic changes."
 
 This is a publishable negative-result + mechanism paper, not a predictive-model paper.
+
+For full manuscript strategy and reviewer-risk handling, see:
+- `docs/design/hard_pivot_publication_strategy.md`
 
 ## Core Claims To Keep
 

@@ -52,15 +52,16 @@ Initial concern: Maybe severity just correlates with token frequency or type.
 - Embedding norm
 - Simple density (mean kNN distance)
 
-Latest strict multi-seed sweep (3 seeds/model, 100 tokens/run, logprob-choice scoring, no proxy confounds):
-- qwen2_5_coder_7b: delta mean -0.166 (0/3 runs positive)
-- qwen2_5_7b: delta mean -0.248 (0/3 runs positive)
-- mistral_7b pilot (2 seeds): delta mean -0.053
-- tinyllama_1_1b pilot (2 seeds): delta mean -0.101
+Final strict package (20 runs across 4 models, no proxy confounds):
+- Pooled geometry-minus-baseline delta: -0.128 (95% CI [-0.168, -0.088])
+- Positive geometry-minus-baseline runs: 1/20
+- Sweep-level gates: FAIL on qwen rescue + both cross-family sweeps
 
-**Interpretation:** Pipeline and stress tests execute end-to-end with real labels, but geometry signal is currently unstable and not stronger than confound baselines in aggregate.
+**Interpretation:** On the current endpoint/protocol, geometry signal is reliably weaker than confound baselines. The predictive claim should be retired for this setup and treated as a rigorous negative finding.
 
-If full-power rescue remains negative, use `docs/design/predictive_negative_reframing.md` for manuscript claim pivot language.
+Use:
+- `docs/design/predictive_negative_reframing.md`
+- `outputs/sweeps/predictive_validity/HARD_PIVOT_REPORT.md`
 
 ## 4. Mechanistic vs Behavioral Evidence
 

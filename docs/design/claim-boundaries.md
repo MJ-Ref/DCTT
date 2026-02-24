@@ -23,6 +23,16 @@ What DCTT can and cannot claim based on current evidence.
 
 **Strength:** Strong. Both empirical and theoretical support.
 
+### 3. "Under strict controls, geometry-only predictive signal is negative across tested models"
+
+**Evidence:**
+- Final strict package: 20 runs across qwen2_5_coder_7b, qwen2_5_7b, mistral_7b, tinyllama_1_1b
+- Pooled geometry-minus-baseline delta: -0.128 (95% CI [-0.168, -0.088])
+- Positive geometry-minus-baseline runs: 1/20
+- Each sweep-level gate verdict: FAIL
+
+**Strength:** Strong for a constrained negative predictive claim on the tested setup.
+
 ---
 
 ## NOT Supported Claims ❌
@@ -30,16 +40,17 @@ What DCTT can and cannot claim based on current evidence.
 ### 1. "Geometry metrics predict token-level failures beyond frequency/type confounds"
 
 **Why not:**
-- Strict real-label sweep on qwen2_5_coder_7b: delta mean -0.166 (0/3 runs positive)
-- Strict real-label sweep on qwen2_5_7b: delta mean -0.248 (0/3 runs positive)
-- Cross-family pilot on mistral_7b: delta mean -0.053 (2 seeds, gate FAIL)
-- Cross-family pilot on tinyllama_1_1b: delta mean -0.101 (2 seeds, gate FAIL)
-- Geometry-only performance is unstable and negative on average
+- Final strict package (20 runs) remains negative:
+- qwen2_5_coder_7b: delta mean -0.211 (0/5 positive)
+- qwen2_5_7b: delta mean -0.164 (0/5 positive)
+- mistral_7b: delta mean -0.074 (0/5 positive)
+- tinyllama_1_1b: delta mean -0.063 (1/5 positive)
+- Pooled geometry-minus-baseline CI excludes zero on the negative side
 
 **What's needed:**
-- Larger real-label sample sizes and stress-test budgets
-- Cross-seed replication at higher power (5+ seeds/model)
-- Stronger token-failure labels (e.g., forced-choice/logprob margins)
+- A different predictive endpoint definition (label redesign), not more runs of the same setup
+- Pre-registered alternative features and ablations for conditional/interaction effects
+- Clear separation of exploratory vs confirmatory predictive claims
 
 ### 2. "Repair causally improves downstream code/math behavior"
 
@@ -58,13 +69,13 @@ What DCTT can and cannot claim based on current evidence.
 ### 3. "Pathologies are consistent across model families"
 
 **Why not:**
-- Replication currently covers only two Qwen-family models
-- No Llama, Mistral, or other model comparisons
+- Current strict replication includes four models but only one endpoint family
+- Cross-family consistency is established for negative predictive signal, not for all pathology taxonomies
 
 **What's needed:**
-- Run census on 2-3 additional models
-- Compare flagged token distributions
-- Test if same tokens flagged across models
+- Model-family expansion beyond current tested set
+- Cross-model token taxonomy alignment and shared-flag analyses
+- Additional tasks/endpoints to test transportability
 
 ### 4. "Geometry metrics are the best predictors of token failures"
 
@@ -83,16 +94,19 @@ What DCTT can and cannot claim based on current evidence.
 ## Claim Language Guide
 
 **Use this language:**
-- "Real-label predictive-validity runs are currently negative for geometry-only models"
+- "Strict real-label predictive-validity runs are negative for geometry-only models"
 - "Cluster repair improves geometry vs placebo"
 - "Single-token repair is insufficient for uniform pathologies"
+- "This paper reports a rigorous negative predictive finding with mechanistic positive evidence"
 
 **Avoid this language:**
 - "Repair fixes token failures" (behavioral not shown)
 - "Geometry causes failures" (correlation, not demonstrated causation)
 - "This works for all LLMs" (only tested one model)
 
-## Fail-Case Manuscript Plan
+## Hard Pivot Manuscript Plan
 
-If the strict predictive gate remains negative after the rescue sweep, use:
+Given finalized strict negative gates, use:
 - `docs/design/predictive_negative_reframing.md`
+- `docs/design/hard_pivot_publication_strategy.md`
+- `outputs/sweeps/predictive_validity/HARD_PIVOT_REPORT.md`
