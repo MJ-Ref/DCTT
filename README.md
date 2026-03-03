@@ -21,7 +21,7 @@ DCTT provides tools to identify tokens with problematic local geometry in LLM em
 
 ```bash
 # Clone the repository
-git clone https://github.com/MJ-Ref/DCTT.git
+git clone https://github.com/Onemoremichael/DCTT.git
 cd DCTT
 
 # Install with development dependencies
@@ -397,7 +397,7 @@ If you use DCTT in your research, please cite:
 @software{dctt2024,
   title = {DCTT: Discrete-to-Continuous Transition Testing for LLM Embedding Geometry},
   year = {2024},
-  url = {https://github.com/MJ-Ref/DCTT}
+  url = {https://github.com/Onemoremichael/DCTT}
 }
 ```
 
